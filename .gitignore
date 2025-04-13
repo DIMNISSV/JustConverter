@@ -1,0 +1,92 @@
+# PyCharm specific files
+.idea/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+venv/
+build/
+dist/
+eggs/
+.eggs/
+sdist/
+wheel/
+pip-wheel-metadata/
+develop-eggs/
+*.egg-info/
+MANIFEST
+
+# PyInstaller
+__pyinstaller/
+*.spec
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# Unit test / coverage reports
+.coverage
+*.coverage
+nosetests.xml
+coverage.xml
+htmlcov/
+.tox/
+.pytest_cache/
+
+# MyPy cache
+.mypy_cache/
+
+# Flake8 cache
+.flake8
+
+# Django stuff:
+*.log
+local_settings.py*
+db.sqlite3
+db.sqlite3-*
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Celery stuff
+celerybeat.pid
+celeryd.pid
+
+# mkdocs
+site/
+
+# Sphinx documentation
+_build/
+
+# Buildout
+parts/
+develop-eggs/
+bin/
+eggs/
+.installed.cfg
+etc/
+
+# Virtualenv
+.venv/
+venv/
+
+# Spyder project settings
+.spyproject
+
+# OS Specific files (add more if needed)
+.DS_Store
+Thumbs.db
+
+test/
