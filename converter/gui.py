@@ -4,6 +4,7 @@ import re
 import subprocess
 import time
 import tkinter as tk
+from doctest import master
 from tkinter import ttk, filedialog, simpledialog, messagebox
 from typing import List, Dict, Tuple, Optional, Any
 
@@ -14,7 +15,10 @@ from .exceptions import FfmpegError, CommandGenerationError, ConversionError
 class VideoConverterGUI:
     def __init__(self, master: tk.Tk):
         self.master = master
-        master.title("Простой Конвертер Видео (Concat Demuxer)")
+        self.VERSION = '0.1b'
+        self.TITLE = f"JustConverter + AdBurner"
+        self.AUTHOR = f"dimnissv"
+        master.title(f'{self.TITLE} ({self.AUTHOR}) {self.VERSION}')
 
         self.notebook = ttk.Notebook(master)
 
@@ -22,6 +26,7 @@ class VideoConverterGUI:
         self.advertisement_tab = ttk.Frame(self.notebook)
         self.transcode_tab = ttk.Frame(self.notebook)
         self.start_tab = ttk.Frame(self.notebook)
+        self.about_tab = ttk.Frame(self.notebook)
 
         self.track_data: Dict[str, Dict[str, str]] = {}
         self.main_video_duration: Optional[float] = None
@@ -34,11 +39,13 @@ class VideoConverterGUI:
         self._create_advertisement_tab_widgets()
         self._create_transcode_tab_widgets()
         self._create_start_tab_widgets()
+        self._create_about_tab_widgets()
 
         self.notebook.add(self.main_tab, text="Файлы")
         self.notebook.add(self.advertisement_tab, text="Реклама")
         self.notebook.add(self.transcode_tab, text="Транскодирование")
         self.notebook.add(self.start_tab, text="Начать")
+        self.notebook.add(self.about_tab, text="О программе")
 
         self.notebook.grid(row=0, column=0, sticky="nsew")
         master.grid_rowconfigure(0, weight=1)
@@ -256,6 +263,42 @@ class VideoConverterGUI:
                                                  command=self.start_conversion,
                                                  font=('Helvetica', 10, 'bold'))
         self.start_conversion_button.grid(row=8, column=0, columnspan=3, pady=10)
+
+    def _create_about_tab_widgets(self) -> None:
+        self.info_text_widget = tk.Text(self.about_tab, wrap=tk.WORD, borderwidth=0, highlightthickness=0,
+                                        state=tk.DISABLED)
+        self.info_text_widget.grid(row=2, column=0, padx=5, pady=5, sticky="ew")
+        self.info_text_widget.tag_config("url", foreground="blue", underline=True)
+        self.info_text_widget.tag_bind("url", "<Button-1>", self._open_url)
+
+        self.info_text_widget.config(state=tk.NORMAL)
+        self.info_text_widget.insert(tk.END, "Программа: ")
+        self.info_text_widget.insert(tk.END, self.TITLE + "\n")
+        self.info_text_widget.insert(tk.END, "Автор: ")
+        self.info_text_widget.insert(tk.END, f"{self.AUTHOR}\n")
+        self.info_text_widget.insert(tk.END, f"Версия: ")
+        self.info_text_widget.insert(tk.END, f"{self.VERSION}\n")
+
+        self._insert_link(self.info_text_widget, "GitHub: ", "https://github.com/DIMNISSV/JustConverter")
+        self._insert_link(self.info_text_widget, "Wiki: ", "https://github.com/DIMNISSV/JustConverter/wiki")
+        self._insert_link(self.info_text_widget, "Telegram: ", "https://t.me/dimnissv")
+
+        self.info_text_widget.config(state=tk.DISABLED)
+
+    def _insert_link(self, text_widget: tk.Text, label: str, url: str) -> None:
+        text_widget.insert(tk.END, label)
+        text_widget.insert(tk.END, url, "url")
+        text_widget.insert(tk.END, "\n")
+
+    def _open_url(self, event: tk.Event) -> None:
+        import webbrowser
+        index = self.info_text_widget.index(tk.CURRENT)
+        tag_indices = self.info_text_widget.tag_ranges("url")
+        for start, end in zip(tag_indices[::2], tag_indices[1::2]):
+            if self.info_text_widget.compare(start, "<=", index) and self.info_text_widget.compare(index, "<", end):
+                url = self.info_text_widget.get(start, end)
+                webbrowser.open_new(url)
+                break
 
     def on_closing(self) -> None:
         self.cleanup_temp_files()
