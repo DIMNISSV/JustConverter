@@ -25,8 +25,8 @@ class VideoConverterGUI:
         self.track_data = {} # Stores user edits { "0:1": {"title": "New Title", "language": "eng"} }
         self.main_video_duration = None
         self.main_video_params = {} # Store key params from ffprobe
-        self.embed_ads = [] # List of dicts: {'path': str, 'timecode': str (MM:SS), 'duration': float}
-        self.banner_timecodes = [] # List of str (MM:SS)
+        self.embed_ads: list[dict] = [] # List of dicts: {'path': str, 'timecode': str (MM:SS), 'duration': float}
+        self.banner_timecodes: list[str] = [] # List of str (MM:SS)
         self.temp_files_to_clean = [] # Store paths of temp files
 
         # --- Widgets ---
@@ -587,7 +587,7 @@ class VideoConverterGUI:
 
         # --- Generate Commands using ffmpeg_utils ---
         try:
-            result = ffmpeg_utils.generate_ffmpeg_commands_concat(
+            result = ffmpeg_utils.generate_ffmpeg_commands(
                 input_file=input_file,
                 output_file=output_file,
                 encoding_params_str=encoding_params_str,
