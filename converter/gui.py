@@ -582,7 +582,7 @@ class VideoConverterGUI:
     def validate_timecode(self, timecode: Any) -> bool:
         if not isinstance(timecode, str):
             return False
-        return re.fullmatch(r"([0-5]?\d):([0-5]\d)", timecode) is not None
+        return re.fullmatch(r"(\d+):([0-5]\d)", timecode) is not None
 
     def timecode_to_seconds(self, timecode: str) -> float:
         if not self.validate_timecode(timecode):
