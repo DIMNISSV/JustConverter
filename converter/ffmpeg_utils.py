@@ -896,8 +896,8 @@ class FFMPEG:
             stream_map = {}
 
             for map_cmd in map_commands:
+                if map_cmd == '-an': continue
                 spec = map_cmd.split()[1].strip('"')
-                if spec == '-an': continue
 
                 is_filter_map = spec.startswith('[')
 
@@ -969,7 +969,8 @@ class FFMPEG:
                 main_cmd_parts.extend(['-cq:v', self.video_cq])
             if self.video_fps:
                 main_cmd_parts.extend(['-r', self.video_fps])
-
+        if '-t' not in main_cmd_parts:
+            main_cmd_parts.extend(['-t', str(final_duration_estimate)])
         # Ensure faststart for MP4
         if output_file.lower().endswith(".mp4"):
             movflags_val = "+faststart"
