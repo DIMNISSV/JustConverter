@@ -18,6 +18,8 @@ class VideoConverterGUI:
 
         self.main_tab = ttk.Frame(self.notebook)
         self.advertisement_tab = ttk.Frame(self.notebook)
+        self.transcode_tab = ttk.Frame(self.notebook)
+        self.start_tab = ttk.Frame(self.notebook)
 
         # --- Common Data ---
         self.track_data = {} # Stores user edits { "0:1": {"title": "New Title", "language": "eng"} }
@@ -30,10 +32,14 @@ class VideoConverterGUI:
         # --- Widgets ---
         self._create_main_tab_widgets()
         self._create_advertisement_tab_widgets()
+        self._create_transcode_tab_widgets()
+        self._create_start_tab_widgets()
 
         # --- Layout Notebook ---
-        self.notebook.add(self.main_tab, text="Основные настройки")
+        self.notebook.add(self.main_tab, text="Файлы")
         self.notebook.add(self.advertisement_tab, text="Реклама")
+        self.notebook.add(self.transcode_tab, text="Транскодирование")
+        self.notebook.add(self.start_tab, text="Начать")
 
         self.notebook.grid(row=0, column=0, sticky="nsew")
         master.grid_rowconfigure(0, weight=1)
@@ -78,42 +84,6 @@ class VideoConverterGUI:
         self.main_tab.grid_rowconfigure(2, weight=1)
         self.main_tab.grid_columnconfigure(1, weight=1)
         self.track_tree.bind("<Double-1>", self.edit_track_data)
-
-        # Encoding Params
-        self.encoding_label = tk.Label(self.main_tab, text="Параметры кодирования (ФИНАЛЬНЫЙ проход):") # Clarified
-        self.encoding_label.grid(row=3, column=0, padx=5, pady=5, sticky="w")
-        self.encoding_entry = tk.Entry(self.main_tab, width=50)
-        # Default using NVENC. Use 'libx264 -preset medium -crf 23' if NVENC unavailable/not desired
-        self.encoding_entry.insert(0, "-c:v h264_nvenc -preset p6 -tune hq -cq 23 -b:v 0 -c:a aac -b:a 192k")
-        self.encoding_entry.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
-
-        # Output File
-        self.output_file_label = tk.Label(self.main_tab, text="Выходной файл:")
-        self.output_file_label.grid(row=4, column=0, padx=5, pady=5, sticky="w")
-        self.output_file_entry = tk.Entry(self.main_tab, width=50)
-        self.output_file_entry.grid(row=4, column=1, padx=5, pady=5, sticky="ew")
-        self.output_file_button = tk.Button(self.main_tab, text="Выбрать", command=self.browse_output_file)
-        self.output_file_button.grid(row=4, column=2, padx=5, pady=5)
-
-        # Generate/Show Command Button
-        self.generate_command_button = tk.Button(self.main_tab, text="Показать команды FFmpeg", # Updated text
-                                                 command=self.show_ffmpeg_commands) # Updated command
-        self.generate_command_button.grid(row=5, column=0, columnspan=3, pady=10)
-
-        # Output Info Text Area
-        self.output_info_label = tk.Label(self.main_tab, text="Команды FFmpeg и Лог:") # Updated text
-        self.output_info_label.grid(row=6, column=0, padx=5, pady=2, sticky="w")
-        self.output_info = tk.Text(self.main_tab, height=12, wrap=tk.WORD) # Increased height
-        self.output_info.grid(row=7, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
-        self.output_scrollbar = tk.Scrollbar(self.main_tab, command=self.output_info.yview)
-        self.output_scrollbar.grid(row=7, column=3, sticky='nsew')
-        self.output_info['yscrollcommand'] = self.output_scrollbar.set
-        self.main_tab.grid_rowconfigure(7, weight=2) # Give more weight to text area
-
-        # Start Conversion Button
-        self.start_conversion_button = tk.Button(self.main_tab, text="Начать конвертацию",
-                                                 command=self.start_conversion)
-        self.start_conversion_button.grid(row=8, column=0, columnspan=3, pady=5)
 
     def _create_advertisement_tab_widgets(self):
         # Embed Ad File
@@ -179,6 +149,43 @@ class VideoConverterGUI:
                                             command=lambda: self.browse_ad_file(self.moving_file_entry, image=True))
         self.moving_file_button.grid(row=6, column=2, padx=5, pady=5)
 
+    def _create_transcode_tab_widgets(self):
+        # Encoding Params
+        self.encoding_label = tk.Label(self.transcode_tab, text="Дополнительные параметры:") # Clarified
+        self.encoding_label.grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        self.encoding_entry = tk.Entry(self.transcode_tab, width=50)
+        # Default using NVENC. Use 'libx264 -preset medium -crf 23' if NVENC unavailable/not desired
+        self.encoding_entry.insert(0, "-c:v h264_nvenc -preset p6 -tune hq -cq 23 -b:v 0 -c:a aac -b:a 192k")
+        self.encoding_entry.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+
+    def _create_start_tab_widgets(self):
+        # Output File
+        self.output_file_label = tk.Label(self.start_tab, text="Выходной файл:")
+        self.output_file_label.grid(row=4, column=0, padx=5, pady=5, sticky="w")
+        self.output_file_entry = tk.Entry(self.start_tab, width=50)
+        self.output_file_entry.grid(row=4, column=1, padx=5, pady=5, sticky="ew")
+        self.output_file_button = tk.Button(self.start_tab, text="Выбрать", command=self.browse_output_file)
+        self.output_file_button.grid(row=4, column=2, padx=5, pady=5)
+
+        # Generate/Show Command Button
+        self.generate_command_button = tk.Button(self.start_tab, text="Показать команды FFmpeg", # Updated text
+                                                 command=self.show_ffmpeg_commands) # Updated command
+        self.generate_command_button.grid(row=5, column=0, columnspan=3, pady=10)
+
+        # Output Info Text Area
+        self.output_info_label = tk.Label(self.start_tab, text="Команды FFmpeg и Лог:") # Updated text
+        self.output_info_label.grid(row=6, column=0, padx=5, pady=2, sticky="w")
+        self.output_info = tk.Text(self.start_tab, height=12, wrap=tk.WORD) # Increased height
+        self.output_info.grid(row=7, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
+        self.output_scrollbar = tk.Scrollbar(self.start_tab, command=self.output_info.yview)
+        self.output_scrollbar.grid(row=7, column=3, sticky='nsew')
+        self.output_info['yscrollcommand'] = self.output_scrollbar.set
+        self.start_tab.grid_rowconfigure(7, weight=2) # Give more weight to text area
+
+        # Start Conversion Button
+        self.start_conversion_button = tk.Button(self.start_tab, text="Начать конвертацию",
+                                                 command=self.start_conversion)
+        self.start_conversion_button.grid(row=8, column=0, columnspan=3, pady=5)
 
     def on_closing(self):
         """Cleanup temporary files before closing."""
@@ -586,11 +593,11 @@ class VideoConverterGUI:
                 encoding_params_str=encoding_params_str,
                 main_video_params=self.main_video_params,
                 main_video_duration=self.main_video_duration,
+                track_data=self.track_data,
                 embed_ads=self.embed_ads,
                 banner_file=banner_file,
                 banner_timecodes=self.banner_timecodes,
-                moving_file=moving_file,
-                track_data=self.track_data # Pass edited metadata
+                moving_file=moving_file
             )
             # Store temp files generated for cleanup later
             self.temp_files_to_clean = result[2] if result else []
