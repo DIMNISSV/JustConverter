@@ -1117,16 +1117,13 @@ class FFMPEG:
         # Add Banner Track input if available
         current_input_index = len(input_definitions)
         banner_track_input_idx = None
-        if concatenated_banner_track_path and os.path.exists(concatenated_banner_track_path):
+        if concatenated_banner_track_path:
             banner_options = []  # No special options needed
             print(
                 f"  Input {current_input_index} (Concatenated Banner Track): {os.path.basename(concatenated_banner_track_path)}")
             input_definitions.append((banner_options, concatenated_banner_track_path))
             banner_track_input_idx = current_input_index
             current_input_index += 1
-        elif concatenated_banner_track_path:
-            print(
-                f"Warning: Concatenated banner track path specified but not found: {concatenated_banner_track_path}. Ignoring banner.")
 
         # Add Moving Logo input if available
         moving_input_idx = None
