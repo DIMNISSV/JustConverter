@@ -24,7 +24,7 @@ class VideoConverterGUI:
             master: The root Tkinter window.
         """
         self.master = master
-        self.VERSION = '0.2'  # Updated version reflecting changes
+        self.VERSION = '0.0.1'
         self.TITLE = "JustConverter + AdBurner"
         self.AUTHOR = "dimnissv"
         master.title(f'{self.TITLE} ({self.AUTHOR}) {self.VERSION}')
