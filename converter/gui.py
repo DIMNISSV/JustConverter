@@ -770,6 +770,7 @@ class VideoConverterGUI:
         banner_track_pix_fmt = self.banner_track_pix_fmt_entry.get().strip() or None
         banner_gap_color = self.banner_gap_color_entry.get().strip() or None
         hwaccel = self.hwaccel_combo.get().strip()
+        additional_encoding = self.additional_encoding_entry.get().strip() or None
 
         error_messages = []
         if not input_file: error_messages.append("- Не выбран входной файл.")
@@ -822,7 +823,8 @@ class VideoConverterGUI:
                 moving_logo_alpha=moving_logo_alpha,
                 banner_track_pix_fmt=banner_track_pix_fmt,
                 banner_gap_color=banner_gap_color,
-                hwaccel=hwaccel)
+                hwaccel=hwaccel,
+                additional_encoding=additional_encoding)
         except Exception as e:
             messagebox.showerror("Ошибка FFmpeg", f"Не удалось создать экземпляр FFmpeg: {e}")
             self.output_info.insert(tk.END, f"ОШИБКА FFmpeg:\nНе удалось создать экземпляр FFmpeg: {e}\n")

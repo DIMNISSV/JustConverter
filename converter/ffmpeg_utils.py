@@ -26,7 +26,8 @@ class FFMPEG:
                  moving_logo_alpha=None,
                  banner_track_pix_fmt=None,
                  banner_gap_color=None,
-                 hwaccel=None):
+                 hwaccel=None,
+                 additional_encoding=None):
         self.video_codec = video_codec if video_codec is not None else config.VIDEO_CODEC
         self.video_preset = video_preset if video_preset is not None else config.VIDEO_PRESET
         self.video_cq = video_cq if video_cq else config.VIDEO_CQ
@@ -40,6 +41,7 @@ class FFMPEG:
         self.banner_track_pix_fmt = banner_track_pix_fmt if banner_track_pix_fmt is not None else config.BANNER_TRACK_PIX_FMT
         self.banner_gap_color = banner_gap_color if banner_gap_color is not None else config.BANNER_GAP_COLOR
         self.hwaccel = hwaccel if hwaccel is not None else config.HWACCEL
+        self.additional_encoding = additional_encoding
 
     @staticmethod
     def run_ffprobe(command: List[str]) -> Dict[str, Any]:
@@ -788,7 +790,8 @@ class FFMPEG:
 
     # --- Generate Main Command ---
     def _generate_main_ffmpeg_command(self,
-                                      input_file: str, output_file: str, encoding_params_str: str, target_params: Dict,
+                                      input_file: str, output_file: str, encoding_params_str: str,
+                                      target_params: Dict,
                                       main_video_duration: float, track_data: Dict,
                                       concatenated_banner_track_path: Optional[str],
                                       original_banner_duration: Optional[float],
@@ -961,6 +964,11 @@ class FFMPEG:
             except ValueError as e:
                 raise CommandGenerationError(f"Неверный синтаксис в параметрах кодирования: {e}")
         else:
+            try:
+                user_params = shlex.split(self.additional_encoding)
+                main_cmd_parts.extend(user_params)
+            except ValueError as e:
+                raise CommandGenerationError(f"Неверный синтаксис в дополнительных параметрах кодирования: {e}")
             main_cmd_parts.extend(['-c:v', self.video_codec, '-c:a', self.audio_codec,
                                    '-preset', self.video_preset, '-b:a', self.audio_bitrate])
             if self.video_bitrate != "0":
