@@ -12,7 +12,7 @@ from .exceptions import FfprobeError, CommandGenerationError, ConversionError, F
 
 class FFMPEG:
     """
-    Handles ffmpeg and ffprobe operations for video conversion,
+    Handles FFmpeg and ffprobe operations for video conversion,
     including ad insertion and overlays.
     """
 
@@ -46,9 +46,9 @@ class FFMPEG:
             moving_logo_relative_height: Height of moving logo relative to video height. Defaults to config.
             moving_logo_alpha: Alpha transparency of moving logo (0.0 to 1.0). Defaults to config.
             banner_track_pix_fmt: Pixel format for the banner track. Defaults to config.
-            banner_gap_color: Color for gaps in the banner track (ffmpeg color syntax). Defaults to config.
+            banner_gap_color: Color for gaps in the banner track (FFmpeg color syntax). Defaults to config.
             hwaccel: Hardware acceleration method (e.g., 'cuda', 'd3d11va', 'auto'). Defaults to config.
-            additional_encoding: Extra ffmpeg command-line parameters for the main encoding step. Defaults to config.
+            additional_encoding: Extra FFmpeg command-line parameters for the main encoding step. Defaults to config.
         """
         self.video_codec = video_codec if video_codec is not None else config.VIDEO_CODEC
         self.video_preset = video_preset if video_preset is not None else config.VIDEO_PRESET
@@ -81,7 +81,7 @@ class FFMPEG:
             return json.loads(result.stdout)
         except FileNotFoundError:
             raise FfprobeError(
-                "ffprobe not found. Ensure ffmpeg (including ffprobe) is installed and in the system PATH.")
+                "ffprobe not found. Ensure FFmpeg (including ffprobe) is installed and in the system PATH.")
         except subprocess.CalledProcessError as e:
             stderr_tail = e.stderr[-1000:] if e.stderr else "N/A"
             raise FfprobeError(
@@ -728,7 +728,7 @@ class FFMPEG:
         if banner_params and banner_params.get('width') and banner_params.get('height'):
             orig_w, orig_h = banner_params['width'], banner_params['height']
             banner_scaled_height = max(1, int(orig_h * (
-                        banner_scaled_width / orig_w))) if orig_w > 0 else banner_scaled_height
+                    banner_scaled_width / orig_w))) if orig_w > 0 else banner_scaled_height
         print(f"  Target banner track dimensions: {banner_scaled_width}x{banner_scaled_height}")
 
         # Create a single, preprocessed banner segment video
@@ -1052,85 +1052,55 @@ class FFMPEG:
         # Return the full filter string and the final output labels for video and audio
         return filter_complex_str, final_video_output_map_label, final_audio_map_label
 
-    def _generate_main_ffmpeg_command(self,
-                                      input_file: str, output_file: str, encoding_params_str: str,
-                                      target_params: Dict,
-                                      main_video_duration: float, track_data: Dict,
-                                      concatenated_banner_track_path: Optional[str],
-                                      original_banner_duration: Optional[float],
-                                      banner_timecodes: Optional[List[str]],
-                                      moving_file: Optional[str],
-                                      is_concat_mode: bool, concat_list_path: Optional[str],
-                                      sorted_embed_ads: List[Dict], total_embed_duration_added: float
-                                      ) -> Tuple[str, List[str]]:
-        """ Generates the main ffmpeg command string using preprocessed inputs and overlays. """
-        print("--- Phase 3: Generating Main Conversion Command ---")
-        # Base command parts, including HWAccel from instance settings
-        main_cmd_parts = ["ffmpeg", "-y", '-hide_banner']
-        if self.hwaccel and self.hwaccel != "none":  # Add hwaccel if specified
-            main_cmd_parts.extend(['-hwaccel', self.hwaccel])
+    def _define_main_command_inputs(self,
+                                    input_file: str, target_params: Dict,
+                                    concatenated_banner_track_path: Optional[str],
+                                    moving_file: Optional[str],
+                                    is_concat_mode: bool, concat_list_path: Optional[str]
+                                    ) -> Tuple[
+        List[Tuple[List[str], str]], str, Optional[str], Optional[str], Optional[int], Optional[int], int]:
 
-        input_definitions = []  # List of tuples: (options_list, path_string)
-        map_commands = []
-        metadata_args = []
-        temp_files_for_main = []  # Track temp files specific to this command (e.g., metadata files)
-
-        # --- Define Inputs ---
-        primary_input_options = []
-        base_video_specifier = "0:v:0?"  # Default video stream from first input
-        base_audio_specifier = "0:a:0?" if target_params['has_audio'] else None  # Default audio stream
+        input_definitions = []
+        base_video_specifier = "0:v:0?"
+        base_audio_specifier = "0:a:0?" if target_params.get('has_audio') else None
         subtitle_input_specifier = None
-        metadata_input_index = 0  # Index of the input file to take metadata from
-
-        # Calculate final duration estimate based on mode
-        final_duration_estimate = main_video_duration + total_embed_duration_added
+        metadata_input_index = 0
 
         if is_concat_mode:
             if not concat_list_path or not os.path.exists(concat_list_path):
                 raise CommandGenerationError("Concat list file (main video + ads) not found or provided.")
-            # Use concat demuxer for the primary input
             primary_input_options = ["-f", "concat", "-safe", "0"]
             primary_input_path = concat_list_path
             print(f"Mode: Concatenation. Input 0 (Video/Audio): {os.path.basename(concat_list_path)}")
 
-            # Need original file as separate input for metadata/subtitles if they exist
-            original_info = self.get_stream_info(input_file)  # Re-probe original for subtitles
+            original_info = self.get_stream_info(input_file)
             if any(s.get('codec_type') == 'subtitle' for s in original_info.get("streams", [])):
                 print(f"  Input 1 (Subs/Metadata Source): {os.path.basename(input_file)}")
-                input_definitions.append(([], input_file))  # Add original file as second input
-                subtitle_input_specifier = "1:s?"  # Subtitles from input 1
-                metadata_input_index = 1  # Metadata from input 1
-            # else: metadata comes from input 0 (the concat) - less reliable
+                input_definitions.append(([], input_file))
+                subtitle_input_specifier = "1:s?"
+                metadata_input_index = 1
         else:
-            # Direct conversion mode
             primary_input_path = input_file
-            metadata_input_index = 0  # Metadata from input 0
-            original_info = self.get_stream_info(input_file)  # Probe for subtitles
+            metadata_input_index = 0
+            original_info = self.get_stream_info(input_file)
             if any(s.get('codec_type') == 'subtitle' for s in original_info.get("streams", [])):
-                subtitle_input_specifier = "0:s?"  # Subtitles from input 0
+                subtitle_input_specifier = "0:s?"
             print(f"Mode: Direct Conversion. Input 0 (Video/Audio/Subs/Metadata): {os.path.basename(input_file)}")
 
-        # Add the primary input definition first
-        input_definitions.insert(0, (primary_input_options, primary_input_path))
-        print(f"Estimated final duration: {final_duration_estimate:.3f}s")
+        input_definitions.insert(0, ([], primary_input_path))
 
-        # Add Banner Track input if available
         current_input_index = len(input_definitions)
         banner_track_input_idx = None
         if concatenated_banner_track_path:
-            banner_options = []  # No special options needed
             print(
                 f"  Input {current_input_index} (Concatenated Banner Track): {os.path.basename(concatenated_banner_track_path)}")
-            input_definitions.append((banner_options, concatenated_banner_track_path))
+            input_definitions.append(([], concatenated_banner_track_path))
             banner_track_input_idx = current_input_index
             current_input_index += 1
 
-        # Add Moving Logo input if available
         moving_input_idx = None
         if moving_file and os.path.exists(moving_file):
-            moving_options = ["-loop", "1"]  # Loop the image
-            # Add frame rate if it's an image (no intrinsic rate) to match target
-            # Check if moving file is likely image (no duration)
+            moving_options = ["-loop", "1"]
             if self.get_media_duration(moving_file) is None and target_params.get('fps_str'):
                 moving_options.extend(["-r", target_params['fps_str']])
             print(f"  Input {current_input_index} (Moving Logo): {os.path.basename(moving_file)}")
@@ -1140,106 +1110,85 @@ class FFMPEG:
         elif moving_file:
             print(f"Warning: Moving logo file specified but not found: {moving_file}. Ignoring logo.")
 
-        # Add all defined inputs to the command
-        for options, path in input_definitions:
-            main_cmd_parts.extend(options)
-            main_cmd_parts.extend(["-i", f'"{path}"'])
+        return input_definitions, base_video_specifier, base_audio_specifier, subtitle_input_specifier, banner_track_input_idx, moving_input_idx, metadata_input_index
 
-        # --- Build Filter Complex ---
-        filter_complex_str, final_video_map_label, final_audio_map_label = self._build_filter_complex(
-            base_video_specifier.rstrip('?'),  # Base video stream (e.g., "0:v:0")
-            base_audio_specifier.rstrip('?') if base_audio_specifier else None,  # Base audio (e.g., "0:a:0")
-            target_params, final_duration_estimate, is_concat_mode,
-            sorted_embed_ads,
-            banner_track_input_idx,  # Index of the banner track input
-            original_banner_duration,  # Needed for 'enable' calculation
-            banner_timecodes,  # Needed for 'enable' calculation
-            moving_file,  # Pass flag indicating moving file exists
-            moving_input_idx  # Index of the moving logo input
-        )
-
-        # --- Apply Filters and Mapping ---
+    @staticmethod
+    def _apply_filters_and_mapping(main_cmd_parts: List[str],
+                                   filter_complex_str: Optional[str],
+                                   final_video_map_label: Optional[str],
+                                   final_audio_map_label: Optional[str],
+                                   base_video_specifier: str,
+                                   base_audio_specifier: Optional[str],
+                                   subtitle_input_specifier: Optional[str],
+                                   target_params: Dict
+                                   ) -> List[str]:
+        map_commands = []
         if filter_complex_str:
-            # Add the filter complex string
             main_cmd_parts.extend(['-filter_complex', f'"{filter_complex_str}"'])
-            # Map the final video output from the filtergraph
             map_commands.append(f'-map "[{final_video_map_label}]"')
-            # Map the audio stream (usually passthrough from base, potentially filtered if needed)
-            if final_audio_map_label and target_params['has_audio']:
-                # If audio filtering happened, final_audio_map_label would be different
-                # Otherwise, it's the base_audio_specifier
-                map_commands.append(f'-map {final_audio_map_label}?')  # Map audio, optional
-            elif not target_params['has_audio']:
-                # Explicitly disable audio if target has none or base audio missing
+            if final_audio_map_label and target_params.get('has_audio'):
+                map_commands.append(f'-map {final_audio_map_label}?')
+            elif not target_params.get('has_audio'):
                 map_commands.append('-an')
         else:
-            # No filters applied, map base streams directly
-            map_commands.append(f'-map {base_video_specifier}')  # Map base video
-            if base_audio_specifier and target_params['has_audio']:
-                map_commands.append(f'-map {base_audio_specifier}')  # Map base audio
-            elif not target_params['has_audio']:
-                map_commands.append('-an')  # Disable audio
+            map_commands.append(f'-map {base_video_specifier}')
+            if base_audio_specifier and target_params.get('has_audio'):
+                map_commands.append(f'-map {base_audio_specifier}')
+            elif not target_params.get('has_audio'):
+                map_commands.append('-an')
 
-        # Map subtitles if they exist
         if subtitle_input_specifier:
             map_commands.append(f"-map {subtitle_input_specifier}")
-            map_commands.extend(["-c:s", "copy"])  # Copy subtitles by default
+            map_commands.extend(["-c:s", "copy"])
 
-        # Add map commands to main command
         main_cmd_parts.extend(map_commands)
+        return map_commands  # Return map commands for metadata handling
 
-        # --- Metadata Handling ---
-        # Map metadata from the designated input index
+    @staticmethod
+    def _handle_metadata(main_cmd_parts: List[str],
+                         track_data: Dict,
+                         metadata_input_index: int,
+                         input_definitions: List[Tuple[List[str], str]],
+                         map_commands: List[str],
+                         base_video_specifier: str,
+                         filter_complex_str: Optional[str]) -> List[str]:
+        metadata_args = []
+        temp_files_for_metadata = []
+
         metadata_args.extend([f'-map_metadata', str(metadata_input_index)])
-        # Use movflags for metadata tags (common practice)
-        # Note: faststart flag might be added later specifically for mp4
         metadata_args.extend(["-movflags", "+use_metadata_tags"])
 
-        # Apply specific track title/language edits from GUI
         source_file_for_metadata = input_definitions[metadata_input_index][1]
         if track_data and os.path.exists(source_file_for_metadata):
-            # Build a map from original stream specifier (input:type:index) to output stream specifier (s:type:index)
-            # This is complex because filtering and mapping change output stream indices.
-            # We need to predict the output index based on the order of -map commands.
             out_v_idx, out_a_idx, out_s_idx = 0, 0, 0
-            output_stream_map = {}  # Map: "input:type:index" -> "s:type:output_index"
+            output_stream_map = {}
 
             for map_cmd_str in map_commands:
                 parts = map_cmd_str.split()
                 if len(parts) < 2 or parts[0] != '-map': continue
                 spec = parts[1].strip('"')
 
-                # If mapping from filtergraph output (video)
                 if spec.startswith('['):
-                    # Assume this corresponds to the first video output stream
-                    # We need to associate this with the *original* video stream used as filter input base
-                    original_spec_key = f"{base_video_specifier.replace('?', '')}"  # e.g., "0:v:0"
-                    # Only map if it hasn't been mapped already (avoids issues if base_video_specifier is used multiple times in theory)
+                    original_spec_key = f"{base_video_specifier.replace('?', '')}"
                     if original_spec_key not in output_stream_map:
                         output_stream_map[original_spec_key] = f"s:v:{out_v_idx}"
                         out_v_idx += 1
-                # If mapping directly from an input stream
                 elif ':' in spec:
                     try:
                         in_idx_str, stream_info = spec.split(':', 1)
                         in_idx = int(in_idx_str)
                     except ValueError:
-                        continue  # Ignore invalid map specifiers
+                        continue
 
-                    # Check if this stream is from the metadata source input
                     if in_idx == metadata_input_index:
-                        stream_type = stream_info[0]  # 'v', 'a', or 's'
-                        stream_index_str = '0'  # Default to index 0 if not specified
+                        stream_type = stream_info[0]
+                        stream_index_str = '0'
                         if ':' in stream_info.strip('?'):
-                            # Extract index if present (e.g., a:1 -> 1)
                             stream_index_str = stream_info.split(':')[-1].strip('?')
 
                         original_spec_key = f"{metadata_input_index}:{stream_type}:{stream_index_str}"
 
-                        # Determine output stream type and index, increment corresponding counter
-                        if stream_type == 'v' and not spec.startswith('['):  # Don't remap video if it came from filter
-                            # This case is tricky - direct video map when filter also exists?
-                            # Let's assume direct map only happens when no filter exists.
+                        if stream_type == 'v' and not spec.startswith('['):
                             if not filter_complex_str:
                                 output_stream_map[original_spec_key] = f"s:v:{out_v_idx}"
                                 out_v_idx += 1
@@ -1252,78 +1201,69 @@ class FFMPEG:
 
             print(f"  Metadata Map (Source Input {metadata_input_index}): {output_stream_map}")
 
-            # Apply user edits based on the generated map
             for track_id_from_user, edits in track_data.items():
-                # Normalize user track ID to match our key format (e.g., "0:v:0")
                 parts = track_id_from_user.split(':')
-                if len(parts) == 2:  # Assume input 0 if not specified
+                if len(parts) == 2:
                     norm_track_id = f"0:{parts[0]}:{parts[1]}"
                 elif len(parts) == 3:
                     norm_track_id = track_id_from_user
                 else:
-                    continue  # Ignore invalid IDs from user data
+                    continue
 
-                # Check if this original stream was mapped to an output stream
                 if norm_track_id in output_stream_map:
-                    output_metadata_specifier = output_stream_map[norm_track_id]  # e.g., "s:a:1"
+                    output_metadata_specifier = output_stream_map[norm_track_id]
                     print(f"    Applying metadata to output stream {output_metadata_specifier} (from {norm_track_id})")
-                    # Apply title if provided
                     if 'title' in edits and edits['title']:
-                        # Quote the title value for safety
                         metadata_args.extend(
                             [f"-metadata:{output_metadata_specifier}", f"title={shlex.quote(str(edits['title']))}"])
-                    # Apply language if provided and valid
                     if 'language' in edits and edits['language']:
                         lang = str(edits['language']).lower()
-                        if len(lang) == 3 and lang.isalpha():  # Basic validation
+                        if len(lang) == 3 and lang.isalpha():
                             metadata_args.extend([f"-metadata:{output_metadata_specifier}", f"language={lang}"])
         else:
             print("  Skipping track-specific metadata edits (no data provided or source invalid).")
 
         main_cmd_parts.extend(metadata_args)
+        return temp_files_for_metadata
 
-        # --- Encoding Parameters ---
-        # Check if manual encoding string is provided
+    def _build_encoding_parameters(self,
+                                   main_cmd_parts: List[str],
+                                   encoding_params_str: str,
+                                   map_commands: List[str]):
+
         if encoding_params_str:
             print(f"  Using manual encoding parameters: {encoding_params_str}")
             try:
-                # Parse the manual string using shlex for safety
                 user_params = shlex.split(encoding_params_str)
                 main_cmd_parts.extend(user_params)
             except ValueError as e:
                 raise CommandGenerationError(f"Invalid syntax in manual encoding parameters: {e}")
         else:
-            # Build encoding parameters from instance settings
             print("  Using encoding parameters from settings:")
-            # Video Encoding
             main_cmd_parts.extend(['-c:v', self.video_codec])
             if self.video_preset: main_cmd_parts.extend(['-preset', self.video_preset])
-            # Prioritize Bitrate over CQ if both are set and bitrate is not '0'
             if self.video_bitrate and self.video_bitrate != "0":
                 print(f"    Video: Bitrate={self.video_bitrate}")
                 main_cmd_parts.extend(['-b:v', self.video_bitrate])
                 if self.video_cq: print("      (Note: CQ setting ignored because bitrate is specified)")
             elif self.video_cq:
                 print(f"    Video: CQ={self.video_cq}")
-                main_cmd_parts.extend(['-cq:v', self.video_cq])  # NVENC/specific encoders
-                main_cmd_parts.extend(['-crf', self.video_cq])  # x264/x265 uses CRF
-                main_cmd_parts.extend(['-b:v', '0'])  # Ensure bitrate is not used when CQ/CRF is active
+                main_cmd_parts.extend(['-cq:v', self.video_cq])
+                main_cmd_parts.extend(['-crf', self.video_cq])
+                main_cmd_parts.extend(['-b:v', '0'])
             else:
                 print("    Video: No bitrate or CQ specified, using codec defaults.")
 
-            # Audio Encoding (only if audio is mapped)
             if any(cmd.startswith('-map') and ':a:' in cmd for cmd in map_commands):
                 print(f"    Audio: Codec={self.audio_codec}, Bitrate={self.audio_bitrate}")
                 main_cmd_parts.extend(['-c:a', self.audio_codec])
                 if self.audio_bitrate and self.audio_codec != 'copy':
                     main_cmd_parts.extend(['-b:a', self.audio_bitrate])
 
-            # Target FPS (if set)
             if self.video_fps:
                 print(f"    Video: Target FPS={self.video_fps}")
                 main_cmd_parts.extend(['-r', self.video_fps])
 
-            # Additional Parameters (if any)
             if self.additional_encoding:
                 print(f"    Additional Params: {self.additional_encoding}")
                 try:
@@ -1332,17 +1272,17 @@ class FFMPEG:
                 except ValueError as e:
                     raise CommandGenerationError(f"Invalid syntax in additional encoding parameters: {e}")
 
-        # --- Final Duration and Output ---
-        # Ensure duration is set if not already specified by manual params
+    @staticmethod
+    def _finalize_main_command(main_cmd_parts: List[str],
+                               final_duration_estimate: float,
+                               output_file: str):
         has_duration_flag = any(part == '-t' for part in main_cmd_parts)
         if not has_duration_flag:
             main_cmd_parts.extend(['-t', f"{final_duration_estimate:.6f}"])
 
-        # Ensure faststart for MP4 output for better web playback
         if output_file.lower().endswith(".mp4"):
             movflags_val = "+faststart"
             movflags_present = False
-            # Check if -movflags is already present and merge if necessary
             temp_cmd_parts = []
             skip_next = False
             for i, part in enumerate(main_cmd_parts):
@@ -1351,15 +1291,12 @@ class FFMPEG:
                     continue
                 if part == "-movflags":
                     movflags_present = True
-                    current_val = movflags_val  # Default if only -movflags is present
+                    current_val = movflags_val
                     if i + 1 < len(main_cmd_parts) and not main_cmd_parts[i + 1].startswith('-'):
-                        # Flag value exists, merge with +faststart
                         existing_flags_str = main_cmd_parts[i + 1]
                         skip_next = True
-                        # Split existing flags, handle potential leading '+'
                         flags = set(f.strip() for f in existing_flags_str.replace('+', ' ').split())
-                        flags.add("faststart")  # Add faststart
-                        # Reconstruct value, ensuring leading '+'
+                        flags.add("faststart")
                         current_val = "+" + "+".join(sorted(list(flags)))
                         print(f"  Merging -movflags: '{existing_flags_str}' -> '{current_val}'")
                     else:
@@ -1368,14 +1305,74 @@ class FFMPEG:
                 else:
                     temp_cmd_parts.append(part)
 
-            # If -movflags wasn't present at all, add it
             if not movflags_present:
                 print(f"  Adding -movflags: '{movflags_val}' for MP4 output.")
                 temp_cmd_parts.extend(["-movflags", movflags_val])
-            main_cmd_parts = temp_cmd_parts
+            main_cmd_parts[:] = temp_cmd_parts  # Modify list in place
 
-        # Add the final output file path
         main_cmd_parts.append(f'"{output_file}"')
+
+    def _generate_main_ffmpeg_command(self,
+                                      input_file: str, output_file: str, encoding_params_str: str,
+                                      target_params: Dict,
+                                      main_video_duration: float, track_data: Dict,
+                                      concatenated_banner_track_path: Optional[str],
+                                      original_banner_duration: Optional[float],
+                                      banner_timecodes: Optional[List[str]],
+                                      moving_file: Optional[str],
+                                      is_concat_mode: bool, concat_list_path: Optional[str],
+                                      sorted_embed_ads: List[Dict], total_embed_duration_added: float
+                                      ) -> Tuple[str, List[str]]:
+        """ Generates the main FFmpeg command string using preprocessed inputs and overlays. """
+        print("--- Phase 3: Generating Main Conversion Command ---")
+        main_cmd_parts = ["ffmpeg", "-y", '-hide_banner']
+        if self.hwaccel and self.hwaccel != "none":
+            main_cmd_parts.extend(['-hwaccel', self.hwaccel])
+
+        final_duration_estimate = main_video_duration + total_embed_duration_added
+        print(f"Estimated final duration: {final_duration_estimate:.3f}s")
+
+        # Step 3.1: Define Inputs
+        input_definitions, base_video_specifier, base_audio_specifier, \
+            subtitle_input_specifier, banner_track_input_idx, moving_input_idx, \
+            metadata_input_index = self._define_main_command_inputs(
+            input_file, target_params, concatenated_banner_track_path, moving_file,
+            is_concat_mode, concat_list_path
+        )
+        for options, path in input_definitions:
+            main_cmd_parts.extend(options)
+            main_cmd_parts.extend(["-i", f'"{path}"'])
+
+        # Step 3.2: Build Filter Complex
+        filter_complex_str, final_video_map_label, final_audio_map_label = self._build_filter_complex(
+            base_video_specifier.rstrip('?'),
+            base_audio_specifier.rstrip('?') if base_audio_specifier else None,
+            target_params, final_duration_estimate, is_concat_mode,
+            sorted_embed_ads,
+            banner_track_input_idx,
+            original_banner_duration,
+            banner_timecodes,
+            moving_file,
+            moving_input_idx
+        )
+
+        # Step 3.3: Apply Filters and Mapping
+        map_commands = self._apply_filters_and_mapping(
+            main_cmd_parts, filter_complex_str, final_video_map_label, final_audio_map_label,
+            base_video_specifier, base_audio_specifier, subtitle_input_specifier, target_params
+        )
+
+        # Step 3.4: Handle Metadata
+        temp_files_for_main = self._handle_metadata(
+            main_cmd_parts, track_data, metadata_input_index, input_definitions, map_commands,
+            base_video_specifier, filter_complex_str
+        )
+
+        # Step 3.5: Build Encoding Parameters
+        self._build_encoding_parameters(main_cmd_parts, encoding_params_str, map_commands)
+
+        # Step 3.6: Finalize Command (Duration, Output, Flags)
+        self._finalize_main_command(main_cmd_parts, final_duration_estimate, output_file)
 
         # Join all parts into the final command string
         final_main_cmd = " ".join(main_cmd_parts)
@@ -1387,7 +1384,7 @@ class FFMPEG:
                                  banner_file: Optional[str], banner_timecodes: Optional[List[str]],
                                  moving_file: Optional[str]):
         """
-        Generates all necessary ffmpeg commands for the conversion process.
+        Generates all necessary FFmpeg commands for the conversion process.
 
         Handles preprocessing for ad concatenation, banner track generation,
         and the final conversion command with overlays.
@@ -1395,7 +1392,7 @@ class FFMPEG:
         Args:
             input_file: Path to the main input video file.
             output_file: Path for the final output video file.
-            encoding_params_str: Manual ffmpeg encoding parameters (overrides individual settings).
+            encoding_params_str: Manual FFmpeg encoding parameters (overrides individual settings).
             track_data: Dictionary with metadata edits for tracks.
             embed_ads: List of dictionaries for embedded ad insertions.
             banner_file: Path to the banner media file (video or image).
@@ -1404,8 +1401,8 @@ class FFMPEG:
 
         Returns:
             A tuple containing:
-            - List[str]: Preprocessing ffmpeg command strings.
-            - str: The main ffmpeg conversion command string.
+            - List[str]: Preprocessing FFmpeg command strings.
+            - str: The main FFmpeg conversion command string.
             - List[str]: A list of temporary file paths created during generation.
 
         Raises:
@@ -1416,47 +1413,39 @@ class FFMPEG:
         all_temp_files = []
         concatenated_banner_track_path = None
         total_embed_duration_added = 0.0
-        concat_list_path_main = None  # Initialize path for main concat list
+        concat_list_path_main = None
 
         print("--- Getting Main Video Parameters ---")
         main_video_params = self.get_essential_stream_params(input_file)
-        # get_essential_stream_params now returns None on critical failure
         if not main_video_params:
             raise CommandGenerationError(f"Could not get essential parameters from: {input_file}")
-        # Attempt to get duration again here, as it might be needed by validation
         main_video_duration = self.get_media_duration(input_file)
 
         print("--- Validating and Preparing Inputs ---")
         try:
-            # Validate inputs, get correct paths, durations, and sorted ad info
             valid_params, valid_duration, sorted_embed_ads_info, \
                 valid_banner_file, valid_banner_timecodes, valid_moving_file, \
                 original_banner_duration = self._validate_and_prepare_inputs(
                 input_file, output_file, main_video_params, main_video_duration,
                 embed_ads, banner_file, banner_timecodes, moving_file)
-            # Use the validated/filtered results
             banner_file = valid_banner_file
             banner_timecodes = valid_banner_timecodes
             moving_file = valid_moving_file
-            main_video_params = valid_params  # Use potentially updated params
-            main_video_duration = valid_duration  # Use potentially updated duration
+            main_video_params = valid_params
+            main_video_duration = valid_duration
         except CommandGenerationError as e:
             print(f"Input validation failed: {e}")
-            raise  # Re-raise validation errors
+            raise
 
         print("--- Determining Target Encoding Parameters ---")
         target_params = self._determine_target_parameters(main_video_params)
 
-        # --- Preprocessing ---
         is_concat_mode = bool(sorted_embed_ads_info)
         if is_concat_mode:
-            # Calculate total duration added by ads
             total_embed_duration_added = sum(ad['duration'] for ad in sorted_embed_ads_info)
-        # Estimate final duration *before* banner generation needs it
         final_duration_estimate = main_video_duration + total_embed_duration_added
         print(f"Estimated final duration (with ads, if any): {final_duration_estimate:.3f}s")
 
-        # Step 1: Generate Main Video/Ad Segments (if concat needed)
         if is_concat_mode:
             try:
                 prep_cmds_main, concat_list_path_main, prep_temp_files_main, _ = \
@@ -1466,75 +1455,68 @@ class FFMPEG:
                 all_preprocessing_commands.extend(prep_cmds_main)
                 all_temp_files.extend(prep_temp_files_main)
             except CommandGenerationError as e:
-                # Cleanup temp files created *so far* before raising
                 utils.cleanup_temp_files(all_temp_files)
                 print(f"Error during video+ad preprocessing: {e}")
-                raise e  # Re-raise error
+                raise e
         else:
             print("--- Preprocessing: Video+Ad concatenation not required ---")
-            # concat_list_path_main remains None
 
-        # Step 2: Generate Banner Track (if applicable)
         if banner_file and banner_timecodes and original_banner_duration is not None:
             try:
                 prep_cmds_banner, _, prep_temp_files_banner, concatenated_banner_path = \
                     self._generate_banner_preprocessing_commands(
                         banner_file, banner_timecodes, original_banner_duration, target_params,
-                        final_duration_estimate,  # Pass estimated duration
-                        is_concat_mode, sorted_embed_ads_info  # Pass ad info for time adjustment
+                        final_duration_estimate,
+                        is_concat_mode, sorted_embed_ads_info
                     )
                 all_preprocessing_commands.extend(prep_cmds_banner)
                 all_temp_files.extend(prep_temp_files_banner)
-                # Store the path to the final concatenated banner track
                 concatenated_banner_track_path = concatenated_banner_path
             except CommandGenerationError as e:
                 utils.cleanup_temp_files(all_temp_files)
                 print(f"Error generating banner track: {e}")
                 raise e
-            except Exception as e:  # Catch unexpected errors during banner generation
+            except Exception as e:
                 utils.cleanup_temp_files(all_temp_files)
                 print(f"Unexpected error generating banner track: {type(e).__name__} - {e}")
-                # Wrap in CommandGenerationError for consistent handling
                 raise CommandGenerationError(f"Failed to generate banner track: {e}") from e
         else:
             print("--- Preprocessing: Banner track not required or invalid ---")
 
-        # --- Generate Main Command ---
-        print("--- Generating Main ffmpeg Command ---")
+        print("--- Generating Main FFmpeg Command ---")
         try:
             main_command, main_temp_files = self._generate_main_ffmpeg_command(
                 input_file=input_file,
                 output_file=output_file,
-                encoding_params_str=encoding_params_str,  # Pass manual override string
+                encoding_params_str=encoding_params_str,
                 target_params=target_params,
-                main_video_duration=main_video_duration,  # Original duration
+                main_video_duration=main_video_duration,
                 track_data=track_data,
-                concatenated_banner_track_path=concatenated_banner_track_path,  # Pass path to banner track
-                original_banner_duration=original_banner_duration,  # Pass original banner duration
-                banner_timecodes=banner_timecodes,  # Pass validated timecodes
-                moving_file=moving_file,  # Pass validated moving file path
+                concatenated_banner_track_path=concatenated_banner_track_path,
+                original_banner_duration=original_banner_duration,
+                banner_timecodes=banner_timecodes,
+                moving_file=moving_file,
                 is_concat_mode=is_concat_mode,
-                concat_list_path=concat_list_path_main,  # Pass path to main concat list
-                sorted_embed_ads=sorted_embed_ads_info,  # Pass processed ad info
-                total_embed_duration_added=total_embed_duration_added  # Pass calculated ad duration
+                concat_list_path=concat_list_path_main,
+                sorted_embed_ads=sorted_embed_ads_info,
+                total_embed_duration_added=total_embed_duration_added
             )
-            all_temp_files.extend(main_temp_files)  # Add any temp files from main cmd gen (e.g., metadata)
+            all_temp_files.extend(main_temp_files)
         except CommandGenerationError as e:
             utils.cleanup_temp_files(all_temp_files)
             print(f"Error generating main command: {e}")
             raise e
-        except Exception as e:  # Catch unexpected errors
+        except Exception as e:
             utils.cleanup_temp_files(all_temp_files)
             print(f"Unexpected error generating main command: {type(e).__name__} - {e}")
             raise CommandGenerationError(f"Failed to generate main command: {e}") from e
 
-        # Return unique list of temporary files
         unique_temp_files = sorted(list(set(all_temp_files)))
         return all_preprocessing_commands, main_command, unique_temp_files
 
     @staticmethod
     def run_ffmpeg_command(cmd: str, step_name: str):
-        """Executes a single ffmpeg command using subprocess.Popen() and handles errors."""
+        """Executes a single FFmpeg command using subprocess.Popen() and handles errors."""
         print(f"\n--- Running Step: {step_name} ---")
         # Log command, truncated if too long
         if len(cmd) > 1000:
@@ -1567,7 +1549,7 @@ class FFMPEG:
                     break
                 stderr_output += line
                 stripped = line.strip()
-                # Look for standard ffmpeg progress indicators
+                # Look for standard FFmpeg progress indicators
                 if stripped.startswith(('frame=', 'size=', 'time=', 'bitrate=', 'speed=')):
                     progress_line = stripped
                     # Print progress line, using carriage return to overwrite previous one
@@ -1600,7 +1582,7 @@ class FFMPEG:
 
         except FileNotFoundError:
             # Specific error if ffmpeg executable isn't found
-            raise FfmpegError("ffmpeg command not found. Ensure ffmpeg is installed and in the system PATH.") from None
+            raise FfmpegError("FFmpeg command not found. Ensure FFmpeg is installed and in the system PATH.") from None
         except ConversionError as e:
             # Re-raise specific conversion errors
             raise e
