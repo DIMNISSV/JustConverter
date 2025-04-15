@@ -29,3 +29,5 @@ The tool provides default settings for common conversion tasks but allows detail
 ## Wiki
 
 You can read how to install and use this program on the [wiki page](https://github.com/DIMNISSV/JustConverter/wiki/JustConverter---AdBurner-‐-User-Documentation-%5BEnglish%5D).
+
+---
