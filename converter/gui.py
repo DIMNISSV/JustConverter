@@ -9,6 +9,8 @@ from typing import List, Dict, Tuple, Optional, Any
 # Import local modules
 from . import ffmpeg_utils, utils, config
 from .exceptions import FfmpegError, CommandGenerationError, ConversionError
+# Import the specific dataclass needed here
+from .ffmpeg_utils import StreamParams
 
 
 class VideoConverterGUI:
@@ -39,13 +41,16 @@ class VideoConverterGUI:
         self.about_tab = ttk.Frame(self.notebook)
 
         # State variables
-        self.track_data: Dict[str, Dict[str, str]] = {}  # Stores user edits for track metadata {track_id: {key: value}}
+        # Keep track_data and embed_ads as Dict/List[Dict] as they are primarily
+        # populated by user interactions before being passed to ffmpeg_utils,
+        # which handles the conversion to dataclasses internally if needed.
+        self.track_data: Dict[str, Dict[str, str]] = {}  # Stores user edits {track_id: {key: value}}
         self.main_video_duration: Optional[float] = None  # Duration of the input video in seconds
-        self.main_video_params: Dict[str, Any] = {}  # Essential parameters of the input video
-        self.embed_ads: List[
-            Dict[str, Any]] = []  # List of ads to embed {'path': str, 'timecode': str, 'duration': float}
+        # Use StreamParams dataclass for main video parameters after analysis
+        self.main_video_params: Optional[StreamParams] = None  # <<< CHANGED TO DATACLASS
+        self.embed_ads: List[Dict[str, Any]] = []  # List of ads {'path': str, 'timecode': str, 'duration': float}
         self.banner_timecodes: List[str] = []  # List of timecodes (MM:SS) for banner display
-        self.temp_files_to_clean: List[str] = []  # List of temporary files generated during the process
+        self.temp_files_to_clean: List[str] = []  # List of temporary files generated
 
         # Build UI elements for each tab
         self._create_main_tab_widgets()
@@ -382,7 +387,7 @@ class VideoConverterGUI:
         # Reset internal data structures
         self.track_data = {}
         self.main_video_duration = None
-        self.main_video_params = {}
+        self.main_video_params = None  # <<< RESET DATACLASS TO NONE
         self.embed_ads = []
         self.banner_timecodes = []
         self.temp_files_to_clean = []
@@ -404,7 +409,29 @@ class VideoConverterGUI:
         self.video_codec_entry.insert(0, config.VIDEO_CODEC)
         self.video_preset_entry.delete(0, tk.END)
         self.video_preset_entry.insert(0, config.VIDEO_PRESET)
-        # ... reset other transcode fields if desired ...
+        self.video_cq_entry.delete(0, tk.END)
+        self.video_cq_entry.insert(0, config.VIDEO_CQ)
+        self.video_bitrate_entry.delete(0, tk.END)
+        self.video_bitrate_entry.insert(0, config.VIDEO_BITRATE)
+        self.audio_codec_entry.delete(0, tk.END)
+        self.audio_codec_entry.insert(0, config.AUDIO_CODEC)
+        self.audio_bitrate_entry.delete(0, tk.END)
+        self.audio_bitrate_entry.insert(0, config.AUDIO_BITRATE)
+        self.hwaccel_combo.set(config.HWACCEL)
+        self.additional_encoding_entry.delete(0, tk.END)
+        self.additional_encoding_entry.insert(0, config.ADDITIONAL_ENCODING)
+        self.encoding_entry.delete(0, tk.END)
+        # Reset Ad settings
+        self.banner_track_pix_fmt_entry.delete(0, tk.END)
+        self.banner_track_pix_fmt_entry.insert(0, config.BANNER_TRACK_PIX_FMT)
+        self.banner_gap_color_entry.delete(0, tk.END)
+        self.banner_gap_color_entry.insert(0, config.BANNER_GAP_COLOR)
+        self.moving_speed_entry.delete(0, tk.END)
+        self.moving_speed_entry.insert(0, str(config.MOVING_SPEED))
+        self.moving_logo_relative_height_entry.delete(0, tk.END)
+        self.moving_logo_relative_height_entry.insert(0, f"{config.MOVING_LOGO_RELATIVE_HEIGHT:.3f}")
+        self.moving_logo_alpha_entry.delete(0, tk.END)
+        self.moving_logo_alpha_entry.insert(0, str(config.MOVING_LOGO_ALPHA))
 
         self.master.update_idletasks()  # Ensure UI updates
         print("State reset complete.")
@@ -445,33 +472,38 @@ class VideoConverterGUI:
             self.output_info.insert('1.0', f"Analyzing file: {os.path.basename(file_path)}...\n")
             self.master.update_idletasks()  # Show message immediately
 
-            # Populate track table and get essential parameters
-            self.populate_track_table(file_path)  # This also sets self.main_video_duration
-            ffmpeg_helper = ffmpeg_utils.FFMPEG()  # Use default FFMPEG instance for analysis
-            self.main_video_params = ffmpeg_helper.get_essential_stream_params(file_path)
+            # Use a temporary FFMPEG instance for analysis
+            # We don't need custom settings for analysis, default is fine.
+            ffmpeg_analyzer = ffmpeg_utils.FFMPEG()
+
+            # Populate track table and get essential parameters/duration
+            # Pass the analyzer instance to avoid creating multiple FFMPEG objects
+            self.populate_track_table(file_path, ffmpeg_analyzer)  # Also sets self.main_video_duration internally
+            self.main_video_params = ffmpeg_analyzer.get_essential_stream_params(file_path)  # <<< ASSIGN DATACLASS HERE
 
             if not self.main_video_params:
                 warning_msg = "Could not retrieve all key parameters from the main video."
                 messagebox.showwarning("Parameter Issue", warning_msg)
                 self.output_info.insert(tk.END, f"WARNING: {warning_msg}\n")
             else:
+                # <<< USE ATTRIBUTE ACCESS FOR DATACLASS >>>
                 print("Essential video parameters retrieved:", self.main_video_params)
                 # Display basic info in the log
                 self.output_info.insert(tk.END,
-                                        f"Video Params (WxH): {self.main_video_params.get('width')}x{self.main_video_params.get('height')}, "
-                                        f"FPS: {self.main_video_params.get('fps_str')}, "
-                                        f"PixFmt: {self.main_video_params.get('pix_fmt')}\n")
-                if self.main_video_params.get('has_audio'):
+                                        f"Video Params (WxH): {self.main_video_params.width}x{self.main_video_params.height}, "
+                                        f"FPS: {self.main_video_params.fps_str}, "
+                                        f"PixFmt: {self.main_video_params.pix_fmt}\n")
+                if self.main_video_params.has_audio:
                     self.output_info.insert(tk.END,
-                                            f"Audio Params: {self.main_video_params.get('sample_rate')} Hz, "
-                                            f"{self.main_video_params.get('channel_layout')}, "
-                                            f"Fmt: {self.main_video_params.get('sample_fmt')}\n")
+                                            f"Audio Params: {self.main_video_params.sample_rate} Hz, "
+                                            f"{self.main_video_params.channel_layout}, "
+                                            f"Fmt: {self.main_video_params.sample_fmt}\n")
                 else:
                     self.output_info.insert(tk.END,
                                             "Audio Params: No audio stream detected or parameters incomplete.\n")
 
                 # Check specifically for width, as it's critical
-                if self.main_video_params.get('width') is None:
+                if self.main_video_params.width is None:
                     error_msg = "Failed to determine video stream parameters. Please select a different file."
                     messagebox.showerror("Video Error", error_msg)
                     self.output_info.insert(tk.END, f"ERROR: {error_msg}\n")
@@ -479,9 +511,9 @@ class VideoConverterGUI:
                     return  # Stop further processing
 
                 # Pre-fill FPS field if available
-                if self.main_video_params.get('fps_str'):
+                if self.main_video_params.fps_str:
                     self.video_fps_entry.delete(0, tk.END)
-                    self.video_fps_entry.insert(0, self.main_video_params.get('fps_str'))
+                    self.video_fps_entry.insert(0, self.main_video_params.fps_str)
 
             if self.main_video_duration is None:
                 self.output_info.insert(tk.END, "WARNING: Could not determine main video duration from ffprobe.\n")
@@ -563,30 +595,27 @@ class VideoConverterGUI:
         else:
             print(f"File selection cancelled for '{entry_widget}'.")
 
-    def populate_track_table(self, file_path: str) -> None:
-        """Populates the track Treeview with stream information from the file."""
+    def populate_track_table(self, file_path: str, analyzer: ffmpeg_utils.FFMPEG) -> None:
+        """Populates the track Treeview using the provided FFMPEG instance."""
         # Clear existing entries
         for item in self.track_tree.get_children():
             self.track_tree.delete(item)
         # Reset state variables related to the previous file
-        self.main_video_duration = None
+        self.main_video_duration = None  # Reset duration
         self.track_data = {}
 
         try:
-            # Get stream info using the helper class (static method call is okay here)
-            stream_info = ffmpeg_utils.FFMPEG.get_stream_info(file_path)
+            # Get stream info using the provided analyzer instance
+            stream_info = analyzer.get_stream_info(file_path)
             if not stream_info:
                 messagebox.showerror("Analysis Error", f"Could not retrieve stream information from:\n{file_path}")
                 return
 
             # Attempt to get duration from format info first
-            format_duration_str = stream_info.get("format", {}).get("duration")
-            if format_duration_str and format_duration_str != "N/A":
-                try:
-                    self.main_video_duration = float(format_duration_str)
-                    print(f"Main duration from format: {self.main_video_duration:.3f}s")
-                except (ValueError, TypeError) as e:
-                    print(f"Error converting format duration '{format_duration_str}': {e}")
+            # We also need the duration, so call get_media_duration as well
+            self.main_video_duration = analyzer.get_media_duration(file_path)
+            if self.main_video_duration:
+                print(f"Main duration from get_media_duration: {self.main_video_duration:.3f}s")
 
             # Iterate through streams and add them to the Treeview
             for i, stream in enumerate(stream_info.get("streams", [])):
@@ -610,15 +639,7 @@ class VideoConverterGUI:
                     bitrate = stream.get('bit_rate')
                     if bitrate: details.append(f"{int(bitrate) // 1000} kb/s")
 
-                    # If format duration failed, try getting from video stream
-                    if self.main_video_duration is None:
-                        stream_dur_str = stream.get("duration")
-                        if stream_dur_str and stream_dur_str != "N/A":
-                            try:
-                                self.main_video_duration = float(stream_dur_str)
-                                print(f"Main duration from video stream: {self.main_video_duration:.3f}s")
-                            except (ValueError, TypeError) as e:
-                                print(f"Error converting video stream duration '{stream_dur_str}': {e}")
+                    # Duration is now fetched separately by get_media_duration
 
                 elif track_type == "audio":
                     details.append(f"{stream.get('codec_name', '?')}")
@@ -639,10 +660,9 @@ class VideoConverterGUI:
                 self.track_tree.insert("", tk.END, iid=track_id_str,
                                        values=(track_id_str, track_type, details_str, track_title, track_language))
 
-            # Final warning if duration couldn't be determined
+            # Final warning if duration couldn't be determined by get_media_duration
             if self.main_video_duration is None:
                 warning_msg = "Could not determine main video duration from ffprobe analysis."
-                # Don't show messagebox here, just log it, as analysis might still be useful
                 self.output_info.insert(tk.END, f"WARNING: {warning_msg}\n")
                 print(f"Warning: {warning_msg}")
 
@@ -650,7 +670,6 @@ class VideoConverterGUI:
             # Handle errors during ffprobe execution for stream info
             print(f"ffprobe error during track table population: {e}")
             messagebox.showerror("ffprobe Error", f"Failed to get stream info:\n{e}")
-            # Don't clear state here, allow user to potentially fix path/file
         except Exception as e:
             print(f"Unexpected error during track table population: {e}")
             messagebox.showerror("Error", f"An unexpected error occurred while analyzing tracks:\n{e}")
@@ -661,32 +680,34 @@ class VideoConverterGUI:
         column_id = self.track_tree.identify_column(event.x)  # Get ID of the clicked column (e.g., #4)
 
         if not item_iid or not column_id:
-            print("Click did not hit a valid row or column.")
+            # item_iid will be an empty string if the click is not on a row
+            # No need to print here, just return
             return
+
+        # --- Use item_iid directly as the track_path_id ---
+        track_path_id: str = item_iid  # item_iid is the string ID we set
 
         # Get the internal name of the column (e.g., "title", "language")
         try:
             column_name_internal = self.track_tree.column(column_id, "id")
         except tk.TclError:
-            print(f"Could not identify column for ID: {column_id}")
+            print(f"Could not identify column name for column ID: {column_id}")
             return  # Invalid column clicked
 
         # Allow editing only for 'title' and 'language' columns
         if column_name_internal not in {'title', 'language'}:
-            print(f"Editing not allowed for column: {column_name_internal}")
+            # print(f"Editing not allowed for column: {column_name_internal}") # No need to print
             return
 
-        # Get current values for the selected row
-        item_values = list(self.track_tree.item(item_iid, "values"))
-        track_path_id = item_values[0]  # The unique ID (e.g., "0:v:0")
-
+        # Get current values for the selected row to find the *current* value for the dialog
         try:
+            item_values = list(self.track_tree.item(item_iid, "values"))
             # Find the index corresponding to the internal column name
             column_index = self.track_tree['columns'].index(column_name_internal)
             current_value = item_values[column_index]
             # Get the display name of the column (from heading)
             column_name_display = self.track_tree.heading(column_id)['text']
-        except (ValueError, IndexError, KeyError) as e:
+        except (ValueError, IndexError, KeyError, tk.TclError) as e:
             print(f"Error getting column data for editing: {e}")
             messagebox.showerror("Error", "Could not retrieve data for editing.")
             return
@@ -694,33 +715,57 @@ class VideoConverterGUI:
         # Ask user for new value using a simple dialog
         new_value = simpledialog.askstring(f"Edit {column_name_display}",
                                            f"Enter new value for '{column_name_display}' (Track ID: {track_path_id}):",
-                                           initialvalue=current_value)
+                                           initialvalue=str(current_value))  # Ensure initial value is string
 
         # Process the new value if user didn't cancel
-        if new_value is not None:
+        if new_value is not None:  # User pressed OK (new_value can be empty string)
             # Special validation for language code
             if column_name_internal == 'language':
                 new_value = new_value.strip().lower()
                 # Basic check for 3-letter ISO 639-2 code
-                if not (len(new_value) == 3 and new_value.isalpha()):
-                    messagebox.showerror("Invalid Language Code",
-                                         "Language code must be 3 letters (e.g., eng, rus, und).")
-                    return
+                if not (len(new_value) == 3 and new_value.isalpha()) and new_value != "":  # Allow empty string
+                    # Allow clearing the language field
+                    if new_value == "":
+                        print(f"Clearing language for track {track_path_id}")
+                    else:
+                        messagebox.showerror("Invalid Language Code",
+                                             "Language code must be 3 letters (e.g., eng, rus, und) or empty.")
+                        return
 
-            # Update the value in the Treeview display
-            item_values[column_index] = new_value
-            self.track_tree.item(item_iid, values=tuple(item_values))  # Update requires tuple
+            # --- Update the Treeview display ---
+            # Get potentially updated values list again before modifying
+            current_item_values = list(self.track_tree.item(item_iid, "values"))
+            try:
+                current_item_values[column_index] = new_value  # Update the specific value
+                self.track_tree.item(item_iid, values=tuple(current_item_values))  # Update requires tuple
+            except (IndexError, tk.TclError) as e:
+                print(f"Error updating treeview item {item_iid}: {e}")
+                messagebox.showerror("Error", "Failed to update the display table.")
+                return
 
-            # Store the change in our internal track_data dictionary
+            # --- Store the change in our internal track_data dictionary ---
+            # Ensure the entry for the track exists
             if track_path_id not in self.track_data:
                 self.track_data[track_path_id] = {}
-            self.track_data[track_path_id][column_name_internal] = new_value
-            print(f"Metadata edit stored for {track_path_id}: {column_name_internal} = '{new_value}'")
-            self.output_info.insert(tk.END,
-                                    f"Metadata updated for {track_path_id}: {column_name_internal} = '{new_value}'\n")
+
+            # Update or remove the specific metadata field
+            if new_value:  # Store non-empty values
+                self.track_data[track_path_id][column_name_internal] = new_value
+                print(f"Metadata edit stored for {track_path_id}: {column_name_internal} = '{new_value}'")
+                self.output_info.insert(tk.END,
+                                        f"Metadata updated for {track_path_id}: {column_name_internal} = '{new_value}'\n")
+            else:  # If new_value is empty, remove the key from edits
+                if column_name_internal in self.track_data[track_path_id]:
+                    del self.track_data[track_path_id][column_name_internal]
+                    print(f"Metadata edit removed for {track_path_id}: {column_name_internal}")
+                    self.output_info.insert(tk.END, f"Metadata cleared for {track_path_id}: {column_name_internal}\n")
+                # If the track entry in track_data becomes empty, remove it too
+                if not self.track_data[track_path_id]:
+                    del self.track_data[track_path_id]
 
     def add_embed_timecode(self) -> None:
         """Adds an embed ad timecode and file to the list."""
+        # --- NO CHANGE NEEDED HERE - Still working with List[Dict[str, Any]] ---
         timecode = self.embed_timecodes_entry.get().strip()
         embed_file = self.embed_file_entry.get().strip()
 
@@ -777,7 +822,7 @@ class VideoConverterGUI:
                                        f"Timecode {timecode} is already added for an embed ad.\nDouble-click the entry in the list to remove it.")
                 return
 
-        # Add the ad data
+        # Add the ad data as a dictionary
         ad_data = {'path': embed_file, 'timecode': timecode, 'duration': embed_duration}
         self.embed_ads.append(ad_data)
         # Keep the list sorted by time in seconds for processing logic
@@ -790,6 +835,7 @@ class VideoConverterGUI:
 
     def delete_embed_timecode(self, event: tk.Event) -> None:
         """Deletes the selected embed ad entry from the list."""
+        # --- NO CHANGE NEEDED HERE - Still working with List[Dict[str, Any]] ---
         selected_indices = self.embed_timecodes_listbox.curselection()
         if not selected_indices:  # No item selected
             return
@@ -816,6 +862,7 @@ class VideoConverterGUI:
 
     def _update_embed_listbox(self) -> None:
         """Updates the embed ad listbox based on the self.embed_ads list."""
+        # --- NO CHANGE NEEDED HERE - Still working with List[Dict[str, Any]] ---
         self.embed_timecodes_listbox.delete(0, tk.END)  # Clear existing items
         # Add each ad with its details
         for ad in self.embed_ads:
@@ -824,6 +871,7 @@ class VideoConverterGUI:
 
     def add_banner_timecode(self) -> None:
         """Adds a banner display timecode to the list."""
+        # --- NO CHANGE NEEDED HERE ---
         timecode = self.banner_timecodes_entry.get().strip()
         banner_file = self.banner_file_entry.get().strip()  # Check if banner file is selected
 
@@ -868,6 +916,7 @@ class VideoConverterGUI:
 
     def delete_banner_timecode(self, event: tk.Event) -> None:
         """Deletes the selected banner timecode from the list."""
+        # --- NO CHANGE NEEDED HERE ---
         selected_indices = self.banner_timecodes_listbox.curselection()
         if not selected_indices:  # No item selected
             return
@@ -895,6 +944,7 @@ class VideoConverterGUI:
 
     def _update_banner_listbox(self) -> None:
         """Updates the banner timecode listbox based on the self.banner_timecodes list."""
+        # --- NO CHANGE NEEDED HERE ---
         self.banner_timecodes_listbox.delete(0, tk.END)  # Clear existing items
         # Add each timecode from the sorted list
         for tc in self.banner_timecodes:
@@ -902,6 +952,7 @@ class VideoConverterGUI:
 
     def detect_hwaccels(self) -> List[str]:
         """Attempts to detect available ffmpeg hardware acceleration methods."""
+        # --- NO CHANGE NEEDED HERE ---
         try:
             # Run ffmpeg -hwaccels to list available methods
             process = subprocess.Popen(["ffmpeg", "-hwaccels", "-hide_banner"],
@@ -977,23 +1028,20 @@ class VideoConverterGUI:
         if self.main_video_duration is None or self.main_video_duration <= 0:
             error_messages.append(
                 "- Could not determine a valid duration for the main video. Please re-select the input file.")
-        if not self.main_video_params or self.main_video_params.get('width') is None:
+        # <<< CHECK DATACLASS ATTRIBUTE >>>
+        if not self.main_video_params or self.main_video_params.width is None:
             error_messages.append(
                 "- Could not get essential parameters from the main video. Please re-select the input file.")
 
         # Warnings for missing files (actual handling is done in ffmpeg_utils)
         if banner_file and not os.path.exists(banner_file):
             self.output_info.insert(tk.END, f"WARNING: Banner file '{banner_file}' not found, it will be ignored.\n")
-            # banner_file = None # Let ffmpeg_utils handle the final decision
         if moving_file and not os.path.exists(moving_file):
             self.output_info.insert(tk.END,
                                     f"WARNING: Moving logo file '{moving_file}' not found, it will be ignored.\n")
-            # moving_file = None # Let ffmpeg_utils handle the final decision
         if banner_file and not self.banner_timecodes:
-            # This is a configuration error the user should fix
             self.output_info.insert(tk.END,
                                     "WARNING: Banner file is selected, but no display timecodes are added. Banner will not be shown.\n")
-            # Don't add to error_messages, as it's just a warning for now
 
         if error_messages:
             full_error_msg = "Please fix the following errors:\n" + "\n".join(error_messages)
@@ -1017,7 +1065,7 @@ class VideoConverterGUI:
                 banner_track_pix_fmt=banner_track_pix_fmt,
                 banner_gap_color=banner_gap_color,
                 hwaccel=hwaccel,
-                additional_encoding=additional_encoding  # Pass additional params string
+                additional_encoding=additional_encoding
             )
         except Exception as e:
             messagebox.showerror("ffmpeg Setup Error", f"Failed to initialize ffmpeg settings: {e}")
@@ -1028,21 +1076,22 @@ class VideoConverterGUI:
         print("Calling generate_ffmpeg_commands with parameters:")
         print(f"  input_file: {input_file}")
         print(f"  output_file: {output_file}")
-        print(f"  encoding_params_str (Manual Override): '{encoding_params_str}'")  # Log manual override
-        # print(f"  main_video_params: {self.main_video_params}") # Already logged during analysis
+        print(f"  encoding_params_str (Manual Override): '{encoding_params_str}'")
+        print(f"  main_video_params: {self.main_video_params}")  # Log the dataclass
         print(f"  main_video_duration: {self.main_video_duration}")
-        print(f"  track_data: {self.track_data}")
-        print(f"  embed_ads: {self.embed_ads}")
+        print(f"  track_data: {self.track_data}")  # Pass Dict[Dict]
+        print(f"  embed_ads: {self.embed_ads}")  # Pass List[Dict]
         print(f"  banner_file: {banner_file}")
         print(f"  banner_timecodes: {self.banner_timecodes}")
         print(f"  moving_file: {moving_file}")
 
         try:
-            # Call the main command generation method
+            # Pass the original dictionary formats for track_data and embed_ads
+            # ffmpeg_utils.generate_ffmpeg_commands expects these formats from GUI
             result = self.ffmpeg_instance.generate_ffmpeg_commands(
                 input_file=input_file,
                 output_file=output_file,
-                encoding_params_str=encoding_params_str,  # Pass the manual override string here
+                encoding_params_str=encoding_params_str,
                 track_data=self.track_data,
                 embed_ads=self.embed_ads,
                 banner_file=banner_file,
@@ -1113,6 +1162,7 @@ class VideoConverterGUI:
 
     def start_conversion(self) -> None:
         """Initiates the ffmpeg conversion process after confirmation."""
+        # --- NO CHANGE NEEDED HERE ---
         # 1. Prepare and Generate Commands
         result = self._prepare_and_generate_commands()
 
@@ -1196,7 +1246,6 @@ class VideoConverterGUI:
                                         f"\nSuccess: {step_name} (took {end_time_main - start_time_main:.2f}s)\n")
                 self.output_info.see(tk.END)
                 self.master.update()
-            # We already checked that main_cmd exists before confirmation
 
             end_time_total = time.time()
             success_msg = (f"\n--- SUCCESS: Conversion completed successfully! ---"
