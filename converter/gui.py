@@ -7,10 +7,10 @@ from tkinter import ttk, filedialog, simpledialog, messagebox
 from typing import List, Dict, Tuple, Optional, Any
 
 # Import local modules
-from . import ffmpeg_utils, utils, config
+from . import ffmpeg, utils, config
 from .exceptions import FfmpegError, CommandGenerationError, ConversionError
 # Import the specific dataclass needed here
-from .ffmpeg_utils import StreamParams
+from .ffmpeg import StreamParams
 
 
 class VideoConverterGUI:
@@ -72,7 +72,7 @@ class VideoConverterGUI:
 
         # Handle window closing
         master.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.ffmpeg_instance: Optional[ffmpeg_utils.FFMPEG] = None  # Instance of the ffmpeg helper class
+        self.ffmpeg_instance: Optional[ffmpeg.FFMPEG] = None  # Instance of the ffmpeg helper class
 
     def _create_main_tab_widgets(self) -> None:
         """Creates widgets for the 'Files' tab."""
@@ -474,7 +474,7 @@ class VideoConverterGUI:
 
             # Use a temporary FFMPEG instance for analysis
             # We don't need custom settings for analysis, default is fine.
-            ffmpeg_analyzer = ffmpeg_utils.FFMPEG()
+            ffmpeg_analyzer = ffmpeg.FFMPEG()
 
             # Populate track table and get essential parameters/duration
             # Pass the analyzer instance to avoid creating multiple FFMPEG objects
@@ -595,7 +595,7 @@ class VideoConverterGUI:
         else:
             print(f"File selection cancelled for '{entry_widget}'.")
 
-    def populate_track_table(self, file_path: str, analyzer: ffmpeg_utils.FFMPEG) -> None:
+    def populate_track_table(self, file_path: str, analyzer: ffmpeg.FFMPEG) -> None:
         """Populates the track Treeview using the provided FFMPEG instance."""
         # Clear existing entries
         for item in self.track_tree.get_children():
@@ -804,7 +804,7 @@ class VideoConverterGUI:
         # Get duration of the ad file itself
         try:
             # Use a temporary FFMPEG instance just for getting duration
-            ffmpeg_helper = ffmpeg_utils.FFMPEG()
+            ffmpeg_helper = ffmpeg.FFMPEG()
             embed_duration = ffmpeg_helper.get_media_duration(embed_file)
             if embed_duration is None or embed_duration <= 0.01:
                 # Handle cases where duration is invalid or the file might be an image
@@ -1051,7 +1051,7 @@ class VideoConverterGUI:
 
         # 4. Create FFMPEG instance with gathered parameters
         try:
-            self.ffmpeg_instance = ffmpeg_utils.FFMPEG(
+            self.ffmpeg_instance = ffmpeg.FFMPEG(
                 video_codec=video_codec,
                 video_preset=video_preset,
                 video_cq=video_cq,
@@ -1223,7 +1223,7 @@ class VideoConverterGUI:
                     self.master.update()
                     start_time_step = time.time()
                     # Use the static method from FFMPEG class to run the command
-                    ffmpeg_utils.FFMPEG.run_ffmpeg_command(cmd, step_name)
+                    ffmpeg.FFMPEG.run_ffmpeg_command(cmd, step_name)
                     end_time_step = time.time()
                     self.output_info.insert(tk.END,
                                             f"Success: {step_name} (took {end_time_step - start_time_step:.2f}s)\n")
@@ -1240,7 +1240,7 @@ class VideoConverterGUI:
                 self.output_info.see(tk.END)
                 self.master.update()
                 start_time_main = time.time()
-                ffmpeg_utils.FFMPEG.run_ffmpeg_command(main_cmd, step_name)
+                ffmpeg.FFMPEG.run_ffmpeg_command(main_cmd, step_name)
                 end_time_main = time.time()
                 self.output_info.insert(tk.END,
                                         f"\nSuccess: {step_name} (took {end_time_main - start_time_main:.2f}s)\n")
