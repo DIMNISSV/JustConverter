@@ -3,7 +3,7 @@
 
 
 class FfmpegError(Exception):
-    """Base exception for FFmpeg related errors."""
+    """Base exception for ffmpeg related errors."""
     pass
 
 
@@ -13,7 +13,7 @@ class FfprobeError(FfmpegError):
 
 
 class CommandGenerationError(FfmpegError):
-    """Exception raised when FFmpeg command generation fails."""
+    """Exception raised when ffmpeg command generation fails."""
     pass
 
 

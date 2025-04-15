@@ -26,7 +26,7 @@ def generate_temp_filename(prefix: str, index: int, extension: str = "mkv") -> s
 
 def escape_path_for_concat(path: str) -> str:
     """
-    Prepares a file path string for safe inclusion in an FFmpeg concat demuxer list file.
+    Prepares a file path string for safe inclusion in an ffmpeg concat demuxer list file.
     Handles backslashes and single quotes.
 
     Args:
@@ -35,7 +35,7 @@ def escape_path_for_concat(path: str) -> str:
     Returns:
         The escaped path, suitable for the concat file format (e.g., 'C:/path/to/file\'s name.mkv').
     """
-    # Replace backslashes with forward slashes (more cross-platform for FFmpeg)
+    # Replace backslashes with forward slashes (more cross-platform for ffmpeg)
     path = path.replace('\\', '/')
     # Escape single quotes by replacing ' with '\''
     path = path.replace("'", "'\\''")

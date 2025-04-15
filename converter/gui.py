@@ -67,7 +67,7 @@ class VideoConverterGUI:
 
         # Handle window closing
         master.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.ffmpeg_instance: Optional[ffmpeg_utils.FFMPEG] = None  # Instance of the FFmpeg helper class
+        self.ffmpeg_instance: Optional[ffmpeg_utils.FFMPEG] = None  # Instance of the ffmpeg helper class
 
     def _create_main_tab_widgets(self) -> None:
         """Creates widgets for the 'Files' tab."""
@@ -289,12 +289,12 @@ class VideoConverterGUI:
         self.start_tab.grid_columnconfigure(1, weight=1)  # Allow entry to expand
 
         # Button to show generated commands
-        self.generate_command_button = tk.Button(self.start_tab, text="Show FFmpeg Commands",
+        self.generate_command_button = tk.Button(self.start_tab, text="Show ffmpeg Commands",
                                                  command=self.show_ffmpeg_commands)
         self.generate_command_button.grid(row=1, column=0, columnspan=3, pady=10)  # Moved up
 
         # Output Info/Log Area
-        self.output_info_label = tk.Label(self.start_tab, text="FFmpeg Commands & Log:")
+        self.output_info_label = tk.Label(self.start_tab, text="ffmpeg Commands & Log:")
         self.output_info_label.grid(row=2, column=0, columnspan=3, padx=5, pady=2, sticky="w")  # Moved up
         self.output_info = tk.Text(self.start_tab, height=15, wrap=tk.WORD, relief=tk.SUNKEN,
                                    borderwidth=1)  # Increased height
@@ -321,7 +321,7 @@ class VideoConverterGUI:
             f"Program: {self.TITLE}\n"
             f"Version: {self.VERSION}\n"
             f"Author: {self.AUTHOR}\n\n"
-            "This tool allows converting video files while optionally embedding advertisements, adding banner overlays, and adding moving logos using FFmpeg.\n\n"
+            "This tool allows converting video files while optionally embedding advertisements, adding banner overlays, and adding moving logos using ffmpeg.\n\n"
         )
 
         info_label = tk.Label(about_frame, text=info_text_content, justify=tk.LEFT)
@@ -490,7 +490,7 @@ class VideoConverterGUI:
 
         except FfmpegError as e:
             error_msg = f"Failed to analyze input file:\n{e}"
-            messagebox.showerror("FFprobe Error", error_msg)
+            messagebox.showerror("ffprobe Error", error_msg)
             self.output_info.insert(tk.END, f"FFPROBE ERROR: {error_msg}\n")
             self._clear_state()  # Reset on analysis failure
 
@@ -648,8 +648,8 @@ class VideoConverterGUI:
 
         except FfmpegError as e:
             # Handle errors during ffprobe execution for stream info
-            print(f"FFprobe error during track table population: {e}")
-            messagebox.showerror("FFprobe Error", f"Failed to get stream info:\n{e}")
+            print(f"ffprobe error during track table population: {e}")
+            messagebox.showerror("ffprobe Error", f"Failed to get stream info:\n{e}")
             # Don't clear state here, allow user to potentially fix path/file
         except Exception as e:
             print(f"Unexpected error during track table population: {e}")
@@ -767,7 +767,7 @@ class VideoConverterGUI:
                                      f"Could not determine a valid positive duration for the ad file:\n{embed_file}\nEnsure it's a valid video file.")
                 return
         except FfmpegError as e:
-            messagebox.showerror("FFprobe Error (Ad)", f"Failed to get ad duration:\n{e}")
+            messagebox.showerror("ffprobe Error (Ad)", f"Failed to get ad duration:\n{e}")
             return
 
         # Check for duplicate timecodes (using the string representation)
@@ -901,7 +901,7 @@ class VideoConverterGUI:
             self.banner_timecodes_listbox.insert(tk.END, tc)
 
     def detect_hwaccels(self) -> List[str]:
-        """Attempts to detect available FFmpeg hardware acceleration methods."""
+        """Attempts to detect available ffmpeg hardware acceleration methods."""
         try:
             # Run ffmpeg -hwaccels to list available methods
             process = subprocess.Popen(["ffmpeg", "-hwaccels", "-hide_banner"],
@@ -929,7 +929,7 @@ class VideoConverterGUI:
         # 1. Cleanup previous state and log
         self.cleanup_temp_files()  # Clear any old temp files first
         self.output_info.delete('1.0', tk.END)
-        self.output_info.insert('1.0', "Preparing and generating FFmpeg commands...\n")
+        self.output_info.insert('1.0', "Preparing and generating ffmpeg commands...\n")
         self.master.update_idletasks()  # Show message immediately
 
         # 2. Gather inputs from GUI fields
@@ -1020,7 +1020,7 @@ class VideoConverterGUI:
                 additional_encoding=additional_encoding  # Pass additional params string
             )
         except Exception as e:
-            messagebox.showerror("FFmpeg Setup Error", f"Failed to initialize FFmpeg settings: {e}")
+            messagebox.showerror("ffmpeg Setup Error", f"Failed to initialize ffmpeg settings: {e}")
             self.output_info.insert(tk.END, f"FFMPEG INIT ERROR:\nFailed to initialize settings: {e}\n")
             return None
 
@@ -1072,13 +1072,13 @@ class VideoConverterGUI:
             return None
 
     def show_ffmpeg_commands(self) -> None:
-        """Generates and displays the FFmpeg commands in the output area."""
+        """Generates and displays the ffmpeg commands in the output area."""
         result = self._prepare_and_generate_commands()
         self.output_info.delete('1.0', tk.END)  # Clear previous output
 
         if result:
             preproc_cmds, main_cmd, temp_files_generated = result
-            output_text = "--- Generated FFmpeg Commands ---\n\n"
+            output_text = "--- Generated ffmpeg Commands ---\n\n"
 
             output_text += "--- Potential Temporary Files ---\n"
             if temp_files_generated:
@@ -1112,12 +1112,12 @@ class VideoConverterGUI:
                                     "Failed to generate commands. Check settings and error messages above/in console.")
 
     def start_conversion(self) -> None:
-        """Initiates the FFmpeg conversion process after confirmation."""
+        """Initiates the ffmpeg conversion process after confirmation."""
         # 1. Prepare and Generate Commands
         result = self._prepare_and_generate_commands()
 
         if not result:
-            messagebox.showerror("Cancelled", "Failed to prepare FFmpeg commands. Conversion cancelled.")
+            messagebox.showerror("Cancelled", "Failed to prepare ffmpeg commands. Conversion cancelled.")
             return
 
         preproc_cmds, main_cmd, _ = result  # We already stored temp files list

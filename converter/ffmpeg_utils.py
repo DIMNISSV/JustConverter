@@ -12,7 +12,7 @@ from .exceptions import FfprobeError, CommandGenerationError, ConversionError, F
 
 class FFMPEG:
     """
-    Handles FFmpeg and ffprobe operations for video conversion,
+    Handles ffmpeg and ffprobe operations for video conversion,
     including ad insertion and overlays.
     """
 
@@ -46,9 +46,9 @@ class FFMPEG:
             moving_logo_relative_height: Height of moving logo relative to video height. Defaults to config.
             moving_logo_alpha: Alpha transparency of moving logo (0.0 to 1.0). Defaults to config.
             banner_track_pix_fmt: Pixel format for the banner track. Defaults to config.
-            banner_gap_color: Color for gaps in the banner track (FFmpeg color syntax). Defaults to config.
+            banner_gap_color: Color for gaps in the banner track (ffmpeg color syntax). Defaults to config.
             hwaccel: Hardware acceleration method (e.g., 'cuda', 'd3d11va', 'auto'). Defaults to config.
-            additional_encoding: Extra FFmpeg command-line parameters for the main encoding step. Defaults to config.
+            additional_encoding: Extra ffmpeg command-line parameters for the main encoding step. Defaults to config.
         """
         self.video_codec = video_codec if video_codec is not None else config.VIDEO_CODEC
         self.video_preset = video_preset if video_preset is not None else config.VIDEO_PRESET
@@ -81,7 +81,7 @@ class FFMPEG:
             return json.loads(result.stdout)
         except FileNotFoundError:
             raise FfprobeError(
-                "ffprobe not found. Ensure FFmpeg (including ffprobe) is installed and in the system PATH.")
+                "ffprobe not found. Ensure ffmpeg (including ffprobe) is installed and in the system PATH.")
         except subprocess.CalledProcessError as e:
             stderr_tail = e.stderr[-1000:] if e.stderr else "N/A"
             raise FfprobeError(
@@ -1063,7 +1063,7 @@ class FFMPEG:
                                       is_concat_mode: bool, concat_list_path: Optional[str],
                                       sorted_embed_ads: List[Dict], total_embed_duration_added: float
                                       ) -> Tuple[str, List[str]]:
-        """ Generates the main FFmpeg command string using preprocessed inputs and overlays. """
+        """ Generates the main ffmpeg command string using preprocessed inputs and overlays. """
         print("--- Phase 3: Generating Main Conversion Command ---")
         # Base command parts, including HWAccel from instance settings
         main_cmd_parts = ["ffmpeg", "-y", '-hide_banner']
@@ -1387,7 +1387,7 @@ class FFMPEG:
                                  banner_file: Optional[str], banner_timecodes: Optional[List[str]],
                                  moving_file: Optional[str]):
         """
-        Generates all necessary FFmpeg commands for the conversion process.
+        Generates all necessary ffmpeg commands for the conversion process.
 
         Handles preprocessing for ad concatenation, banner track generation,
         and the final conversion command with overlays.
@@ -1395,7 +1395,7 @@ class FFMPEG:
         Args:
             input_file: Path to the main input video file.
             output_file: Path for the final output video file.
-            encoding_params_str: Manual FFmpeg encoding parameters (overrides individual settings).
+            encoding_params_str: Manual ffmpeg encoding parameters (overrides individual settings).
             track_data: Dictionary with metadata edits for tracks.
             embed_ads: List of dictionaries for embedded ad insertions.
             banner_file: Path to the banner media file (video or image).
@@ -1404,8 +1404,8 @@ class FFMPEG:
 
         Returns:
             A tuple containing:
-            - List[str]: Preprocessing FFmpeg command strings.
-            - str: The main FFmpeg conversion command string.
+            - List[str]: Preprocessing ffmpeg command strings.
+            - str: The main ffmpeg conversion command string.
             - List[str]: A list of temporary file paths created during generation.
 
         Raises:
@@ -1500,7 +1500,7 @@ class FFMPEG:
             print("--- Preprocessing: Banner track not required or invalid ---")
 
         # --- Generate Main Command ---
-        print("--- Generating Main FFmpeg Command ---")
+        print("--- Generating Main ffmpeg Command ---")
         try:
             main_command, main_temp_files = self._generate_main_ffmpeg_command(
                 input_file=input_file,
@@ -1534,7 +1534,7 @@ class FFMPEG:
 
     @staticmethod
     def run_ffmpeg_command(cmd: str, step_name: str):
-        """Executes a single FFmpeg command using subprocess.Popen() and handles errors."""
+        """Executes a single ffmpeg command using subprocess.Popen() and handles errors."""
         print(f"\n--- Running Step: {step_name} ---")
         # Log command, truncated if too long
         if len(cmd) > 1000:
@@ -1567,7 +1567,7 @@ class FFMPEG:
                     break
                 stderr_output += line
                 stripped = line.strip()
-                # Look for standard FFmpeg progress indicators
+                # Look for standard ffmpeg progress indicators
                 if stripped.startswith(('frame=', 'size=', 'time=', 'bitrate=', 'speed=')):
                     progress_line = stripped
                     # Print progress line, using carriage return to overwrite previous one
@@ -1600,7 +1600,7 @@ class FFMPEG:
 
         except FileNotFoundError:
             # Specific error if ffmpeg executable isn't found
-            raise FfmpegError("FFmpeg command not found. Ensure FFmpeg is installed and in the system PATH.") from None
+            raise FfmpegError("ffmpeg command not found. Ensure ffmpeg is installed and in the system PATH.") from None
         except ConversionError as e:
             # Re-raise specific conversion errors
             raise e

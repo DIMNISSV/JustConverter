@@ -1,9 +1,9 @@
 # main.py
 import subprocess
-import tkinter as tk
-from converter.gui import VideoConverterGUI
 import sys
-import os
+import tkinter as tk
+
+from converter.gui import VideoConverterGUI
 
 # Optional: Add project root to sys.path if running from a different directory
 # current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -13,22 +13,23 @@ import os
 
 
 if __name__ == "__main__":
-    # Basic check for FFmpeg/FFprobe before starting GUI
+    # Basic check for ffmpeg/ffprobe before starting GUI
     try:
         subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True, text=True)
         subprocess.run(["ffprobe", "-version"], capture_output=True, check=True, text=True)
-        print("FFmpeg и FFprobe найдены.")
+        print("ffmpeg и ffprobe найдены.")
     except FileNotFoundError:
-        print("ОШИБКА: FFmpeg или FFprobe не найдены в системном PATH.")
-        print("Пожалуйста, установите FFmpeg и убедитесь, что он доступен в PATH перед запуском.")
+        print("ОШИБКА: ffmpeg или ffprobe не найдены в системном PATH.")
+        print("Пожалуйста, установите ffmpeg и убедитесь, что он доступен в PATH перед запуском.")
         # Optionally show a simple Tk message box here too
         root = tk.Tk()
-        root.withdraw() # Hide the main window
-        tk.messagebox.showerror("Ошибка запуска", "FFmpeg или FFprobe не найдены.\nУстановите FFmpeg и добавьте его в PATH.")
+        root.withdraw()  # Hide the main window
+        tk.messagebox.showerror("Ошибка запуска",
+                                "ffmpeg или ffprobe не найдены.\nУстановите ffmpeg и добавьте его в PATH.")
         sys.exit(1)
     except Exception as e:
-         print(f"Ошибка при проверке FFmpeg/FFprobe: {e}")
-         # Decide if you want to proceed or exit
+        print(f"Ошибка при проверке ffmpeg/ffprobe: {e}")
+        # Decide if you want to proceed or exit
 
     # Start the GUI
     root = tk.Tk()
