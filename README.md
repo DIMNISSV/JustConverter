@@ -1,25 +1,33 @@
-# JustConverter + AdBurner Wiki
+## Introduction
 
-Этот инструмент предназначен для конвертации видео, встраивания рекламы и наложения баннеров с использованием ffmpeg. Он предоставляет графический интерфейс для упрощения процесса, позволяя вам:
+`JustConverter + AdBurner` is a graphical user interface (GUI) application designed to simplify video conversion using the powerful `ffmpeg` library. Beyond basic transcoding, it specializes in integrating advertisements directly into video files through various methods:
 
-*   Конвертировать видеофайлы в различные форматы.
-*   Встраивать видеорекламу в определенные моменты времени.
-*   Накладывать баннеры на видео.
-*   Добавлять бегущие строки (логотипы)
+*   **Embedding:** Inserting video ad clips at specific timecodes.
+*   **Banner Overlays:** Displaying video or image banners at specified times.
+*   **Moving Logos:** Overlaying an image logo that moves around the screen.
 
-Рекомендую ознакомиться с [Быстрым стартом](https://github.com/DIMNISSV/JustConverter/wiki/Quick-Start).
+The tool provides default settings for common conversion tasks but allows detailed customization of encoding parameters, track metadata, and ad placement.
 
-[Wiki](https://github.com/DIMNISSV/JustConverter/wiki) содержит подробную информацию о каждой вкладке и доступных настройках программы.
+---
 
-## Содержание
+## Features
 
-*   [Вкладка "Файлы"](https://github.com/DIMNISSV/JustConverter/wiki/Files)
-*   [Вкладка "Реклама"](https://github.com/DIMNISSV/JustConverter/wiki/Advertisement)
-*   [Вкладка "Транскодирование"](https://github.com/DIMNISSV/JustConverter/wiki/Transcoding)
-*   [Вкладка "Начать"](https://github.com/DIMNISSV/JustConverter/wiki/Start)
-*   [Вкладка "О программе"](https://github.com/DIMNISSV/JustConverter/wiki/About)
-*   [Настройка параметров по умолчанию (config.py)](https://github.com/DIMNISSV/JustConverter/wiki/Config)
+*   **Video Conversion:** Transcode videos using various codecs (e.g., H.264, HEVC) and settings.
+*   **Ad Embedding:** Insert video advertisements seamlessly at multiple points in the main video.
+*   **Banner Ad Overlays:** Add static or animated banners (from video or image files) visible during specific time intervals.
+*   **Moving Logo:** Overlay a customizable moving logo (image) for branding or watermarking.
+*   **Track Management:** View video, audio, and subtitle tracks. Edit Title and Language metadata for tracks.
+*   **Parameter Control:** Adjust video/audio codecs, bitrates, quality (CQ/CRF), presets, FPS, and hardware acceleration.
+*   **Hardware Acceleration:** Detects and utilizes available ffmpeg hardware acceleration methods (e.g., NVENC, QSV, VAAPI) for faster encoding (if supported by hardware and ffmpeg build).
+*   **Command Preview:** View the generated `ffmpeg` commands before starting the conversion.
+*   **Logging:** Displays `ffmpeg` output and progress during conversion.
+*   **Cross-Platform:** Built with Python and Tkinter, aiming for compatibility with Linux and Windows.
+*   **Temporary File Management:** Automatically generates and cleans up temporary files used during processing.
 
-## Поддержка
+---
 
-Если у вас возникли вопросы или проблемы, обратитесь к [GitHub](https://github.com/DIMNISSV/JustConverter) или напишите в [Telegram](https://t.me/dimnissv).
+## Wiki
+
+You can read how to install and use this program on the [wiki page](https://github.com/DIMNISSV/JustConverter/wiki/JustConverter---AdBurner-‐-User-Documentation-%5BEnglish%5D).
+
+---
