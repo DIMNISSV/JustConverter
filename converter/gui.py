@@ -40,7 +40,7 @@ class VideoConverterGUI:
         self.transcode_tab = ttk.Frame(self.notebook)
         self.start_tab = ttk.Frame(self.notebook)
         self.about_tab = ttk.Frame(self.notebook)
-        # <<< LATER: Add self.settings_tab here in Commit 2 >>>
+        self.settings_tab = ttk.Frame(self.notebook)  # Create Settings tab frame
 
         # State variables
         self.track_data: Dict[str, Dict[str, str]] = {}
@@ -56,7 +56,7 @@ class VideoConverterGUI:
         self._create_transcode_tab_widgets()
         self._create_start_tab_widgets()
         self._create_about_tab_widgets()
-        # <<< LATER: Call _create_settings_tab_widgets() here in Commit 2 >>>
+        self._create_settings_tab_widgets()  # Call function to create settings widgets
 
         self._define_widget_map()
 
@@ -65,8 +65,8 @@ class VideoConverterGUI:
         self.notebook.add(self.advertisement_tab, text="Advertisement")
         self.notebook.add(self.transcode_tab, text="Transcoding")
         self.notebook.add(self.start_tab, text="Start")
+        self.notebook.add(self.settings_tab, text="Settings")  # Add Settings tab to notebook
         self.notebook.add(self.about_tab, text="About")
-        # <<< LATER: Add Settings tab here in Commit 2 >>>
 
         self.notebook.grid(row=0, column=0, sticky="nsew")
         master.grid_rowconfigure(0, weight=1)
@@ -77,7 +77,6 @@ class VideoConverterGUI:
         self.ffmpeg_instance: Optional[ffmpeg.FFMPEG] = None
 
         self._load_settings()
-        # --- <<< END ADDED >>> ---
 
     def _define_widget_map(self):
         """Defines the mapping between setting keys and GUI widgets."""
@@ -368,6 +367,33 @@ class VideoConverterGUI:
         self._insert_link(links_frame, "GitHub:", "https://github.com/DIMNISSV/JustConverter", 0)
         self._insert_link(links_frame, "Wiki:", "https://github.com/DIMNISSV/JustConverter/wiki", 1)
         self._insert_link(links_frame, "Telegram:", "https://t.me/dimnissv", 2)
+
+    def _create_settings_tab_widgets(self) -> None:
+        """Creates widgets for the 'Settings' tab."""
+        settings_frame = ttk.LabelFrame(self.settings_tab, text="Application Settings", padding=10)
+        settings_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        self.settings_tab.grid_columnconfigure(0, weight=1)
+
+        # Button Frame
+        button_frame = ttk.Frame(settings_frame)
+        button_frame.grid(row=0, column=0, pady=5, sticky="ew")
+
+        # Save Settings Button
+        self.save_settings_button = tk.Button(button_frame, text="Save Current Settings", command=self._save_settings)
+        self.save_settings_button.grid(row=0, column=0, padx=5, pady=5)
+
+        # Load Settings Button
+        self.load_settings_button = tk.Button(button_frame, text="Load Settings from File",
+                                              command=self._load_settings_manual)  # Use a new manual load function
+        self.load_settings_button.grid(row=0, column=1, padx=5, pady=5)
+
+        # Reset Settings Button
+        self.reset_settings_button = tk.Button(button_frame, text="Reset to Defaults",
+                                               command=self._reset_settings_to_defaults)
+        self.reset_settings_button.grid(row=0, column=2, padx=5, pady=5)
+
+        # Optional: Add path configurations later
+        # ...
 
     def _insert_link(self, parent: ttk.Frame, label_text: str, url: str, row_num: int) -> None:
         """Helper to insert a clickable link label."""
@@ -1333,10 +1359,13 @@ class VideoConverterGUI:
             base_path = os.getcwd()
         return os.path.join(base_path, config.SETTINGS_FILENAME)
 
-    def _load_settings(self) -> None:
+    def _load_settings(self, filepath: Optional[str] = None) -> None:  # Added optional filepath argument
         """Loads settings from the JSON file and applies them to the GUI."""
-        filepath = self._get_settings_filepath()
+        if filepath is None:
+            filepath = self._get_settings_filepath()  # Use default if no path provided
+
         print(f"Attempting to load settings from: {filepath}")
+        # Rest of the function remains the same as in Commit 1...
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 settings_data = json.load(f)
@@ -1347,19 +1376,22 @@ class VideoConverterGUI:
                     widget, widget_type = self.widget_map[key]
                     try:
                         if widget_type == 'entry':
-                            # Check if widget is an Entry
                             if isinstance(widget, (tk.Entry, ttk.Entry)):
                                 widget.delete(0, tk.END)
-                                widget.insert(0, str(value))  # Ensure value is string for Entry
+                                widget.insert(0, str(value))
                             else:
                                 print(f"  Warning: Widget for key '{key}' is not an Entry.")
                         elif widget_type == 'combo':
-                            # Check if widget is a Combobox
                             if isinstance(widget, ttk.Combobox):
-                                widget.set(str(value))  # Ensure value is string for Combobox
+                                # Check if the loaded value exists in the Combobox options
+                                current_values = widget['values']
+                                if value in current_values:
+                                    widget.set(str(value))
+                                else:
+                                    print(
+                                        f"  Warning: Loaded value '{value}' for key '{key}' not found in Combobox options {current_values}. Skipping.")
                             else:
                                 print(f"  Warning: Widget for key '{key}' is not a Combobox.")
-                        # Add more types if needed (e.g., Checkbutton)
                     except Exception as e:
                         print(f"  Warning: Could not set widget for key '{key}': {e}")
                 else:
@@ -1367,7 +1399,9 @@ class VideoConverterGUI:
 
         except FileNotFoundError:
             print(f"Settings file not found at '{filepath}'. Using default values.")
-            # No action needed, GUI defaults are already set from config.py
+            # Only show message if loading manually and file not found
+            if filepath != self._get_settings_filepath():  # Or some other flag indicating manual load
+                messagebox.showwarning("Load Error", f"Settings file not found:\n{filepath}")
         except json.JSONDecodeError:
             print(f"Error decoding JSON from '{filepath}'. File might be corrupt. Using default values.")
             messagebox.showwarning("Settings Error",
@@ -1376,11 +1410,35 @@ class VideoConverterGUI:
             print(f"Unexpected error loading settings: {e}")
             messagebox.showerror("Settings Error", f"An unexpected error occurred while loading settings:\n{e}")
 
-    def _save_settings(self) -> None:
+    def _load_settings_manual(self) -> None:
+        """Handles the manual loading of settings via the button."""
+        # Optional: Ask user if they want to save current settings first
+        # if messagebox.askyesno("Save Changes?", "Save current settings before loading new ones?"):
+        #    self._save_settings()
+
+        # For now, just reload from the standard file.
+        # To allow choosing files:
+        # filepath = filedialog.askopenfilename(
+        #     title="Select Settings File",
+        #     initialdir=os.path.dirname(self._get_settings_filepath()), # Suggest current dir
+        #     filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")],
+        #     defaultextension=".json"
+        # )
+        # if not filepath:
+        #     print("Settings load cancelled.")
+        #     return
+        # self._load_settings(filepath) # Pass selected path to _load_settings
+
+        # Simplified: Reload from default path
+        print("Manually reloading settings...")
+        self._load_settings()  # Reload from the default file path
+        messagebox.showinfo("Settings Loaded", f"Settings loaded from {config.SETTINGS_FILENAME}")
+
+    def _save_settings(self, filepath: Optional[str] = None) -> None:  # Added optional filepath argument
         """Saves current settings from the GUI to the JSON file."""
         settings_to_save = {}
         print("Gathering settings to save...")
-
+        # ... (gathering logic remains the same) ...
         for key, (widget, widget_type) in self.widget_map.items():
             try:
                 value = None
@@ -1396,25 +1454,23 @@ class VideoConverterGUI:
                     else:
                         print(f"  Warning: Cannot get value, widget for key '{key}' is not a Combobox.")
                         continue
-                # Add more types if needed
 
                 if value is not None:
                     settings_to_save[key] = value
-                    # print(f"  Saving: {key} = {value}") # Optional debug log
                 else:
-                    # This case might happen if a widget type is unhandled
                     print(f"  Warning: Could not retrieve value for key '{key}' (widget type: {widget_type}).")
 
             except Exception as e:
                 print(f"  Warning: Could not get value for key '{key}': {e}")
 
-        filepath = self._get_settings_filepath()
+        if filepath is None:
+            filepath = self._get_settings_filepath()  # Use default if no path provided
+
         print(f"Attempting to save settings to: {filepath}")
+        # ... (saving logic remains the same) ...
         try:
-            # Create directory if it doesn't exist (might be needed in future if path changes)
-            # os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(settings_to_save, f, indent=4)  # Use indent for readability
+                json.dump(settings_to_save, f, indent=4)
             print("Settings saved successfully.")
         except IOError as e:
             print(f"Error writing settings file to '{filepath}': {e}")
@@ -1422,3 +1478,69 @@ class VideoConverterGUI:
         except Exception as e:
             print(f"Unexpected error saving settings: {e}")
             messagebox.showerror("Settings Error", f"An unexpected error occurred while saving settings:\n{e}")
+
+    def _reset_settings_to_defaults(self) -> None:
+        """Resets GUI fields to default values from config.py."""
+        print("Resetting settings to defaults...")
+        confirm = messagebox.askyesno("Reset Settings",
+                                      "Are you sure you want to reset all transcoding and advertisement settings to their default values?")
+        if not confirm:
+            print("Reset cancelled by user.")
+            return
+
+        try:
+            default_settings = {
+                # Transcoding Tab
+                "video_codec": config.VIDEO_CODEC,
+                "video_preset": config.VIDEO_PRESET,
+                "video_cq": config.VIDEO_CQ,
+                "video_bitrate": config.VIDEO_BITRATE,
+                "video_fps": "",  # Default FPS override is empty
+                "audio_codec": config.AUDIO_CODEC,
+                "audio_bitrate": config.AUDIO_BITRATE,
+                "hwaccel": config.HWACCEL,
+                "additional_encoding": config.ADDITIONAL_ENCODING,
+                "encoding_params_str": "",  # Manual override default is empty
+                # Advertisement Tab
+                "banner_track_pix_fmt": config.BANNER_TRACK_PIX_FMT,
+                "banner_gap_color": config.BANNER_GAP_COLOR,
+                "moving_speed": str(config.MOVING_SPEED),
+                "moving_logo_relative_height": f"{config.MOVING_LOGO_RELATIVE_HEIGHT:.3f}",
+                "moving_logo_alpha": str(config.MOVING_LOGO_ALPHA),
+            }
+
+            for key, default_value in default_settings.items():
+                if key in self.widget_map:
+                    widget, widget_type = self.widget_map[key]
+                    try:
+                        if widget_type == 'entry':
+                            if isinstance(widget, (tk.Entry, ttk.Entry)):
+                                widget.delete(0, tk.END)
+                                widget.insert(0, default_value)
+                            else:
+                                print(f"  Warning: Cannot reset, widget for key '{key}' is not an Entry.")
+                        elif widget_type == 'combo':
+                            if isinstance(widget, ttk.Combobox):
+                                # Ensure default value is in the list of values, otherwise set to first item or empty
+                                if default_value in widget['values']:
+                                    widget.set(default_value)
+                                elif widget['values']:
+                                    widget.set(widget['values'][0])  # Fallback to first item
+                                    print(
+                                        f"  Warning: Default value '{default_value}' for '{key}' not in Combobox values. Set to '{widget['values'][0]}'.")
+                                else:
+                                    widget.set("")  # Fallback to empty if no values
+                                    print(f"  Warning: Cannot set default value for '{key}', Combobox has no values.")
+                            else:
+                                print(f"  Warning: Cannot reset, widget for key '{key}' is not a Combobox.")
+                    except Exception as e:
+                        print(f"  Warning: Could not reset widget for key '{key}': {e}")
+                else:
+                    print(f"  Warning: Setting key '{key}' not found in widget map during reset.")
+
+            print("Settings reset to defaults.")
+            messagebox.showinfo("Settings Reset", "Settings have been reset to their default values.")
+
+        except Exception as e:
+            print(f"Error resetting settings to defaults: {e}")
+            messagebox.showerror("Reset Error", f"An error occurred while resetting settings:\n{e}")
