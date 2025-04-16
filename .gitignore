@@ -90,3 +90,5 @@ venv/
 Thumbs.db
 
 test/
+
+converter_settings.json

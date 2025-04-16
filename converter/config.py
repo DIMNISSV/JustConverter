@@ -4,6 +4,9 @@ Default configuration values for ffmpeg settings used in the converter.
 These values are used if specific parameters are not provided via the GUI.
 """
 
+# --- Settings File ---
+SETTINGS_FILENAME: str = "converter_settings.json"
+
 # --- Video Encoding ---
 VIDEO_CODEC: str = "h264_nvenc"  # Default video codec (e.g., "libx264", "h264_nvenc", "hevc_nvenc")
 VIDEO_PRESET: str = "fast"  # Default encoding preset (e.g., "ultrafast", "medium", "slow")
