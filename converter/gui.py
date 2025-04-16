@@ -47,7 +47,7 @@ class VideoConverterGUI:
         self.track_data: Dict[str, Dict[str, str]] = {}  # Stores user edits {track_id: {key: value}}
         self.main_video_duration: Optional[float] = None  # Duration of the input video in seconds
         # Use StreamParams dataclass for main video parameters after analysis
-        self.main_video_params: Optional[StreamParams] = None  # <<< CHANGED TO DATACLASS
+        self.main_video_params: Optional[StreamParams] = None  # <<< Has float fps attribute
         self.embed_ads: List[Dict[str, Any]] = []  # List of ads {'path': str, 'timecode': str, 'duration': float}
         self.banner_timecodes: List[str] = []  # List of timecodes (MM:SS) for banner display
         self.temp_files_to_clean: List[str] = []  # List of temporary files generated
@@ -238,11 +238,12 @@ class VideoConverterGUI:
         self.video_bitrate_entry.grid(row=3, column=1, padx=5, pady=5, sticky='w')
         self.video_bitrate_entry.insert(0, config.VIDEO_BITRATE)  # Default from config
 
-        self.video_fps_label = tk.Label(self.transcode_tab, text='Video FPS (Optional):')
+        self.video_fps_label = tk.Label(self.transcode_tab,
+                                        text='Video FPS (Optional Override):')  # <<< CLARIFIED LABEL
         self.video_fps_label.grid(row=4, column=0, padx=5, pady=5, sticky='w')
         self.video_fps_entry = tk.Entry(self.transcode_tab, width=20)
         self.video_fps_entry.grid(row=4, column=1, padx=5, pady=5, sticky='w')
-        # Default FPS is blank (uses source FPS)
+        # Default FPS is blank (uses source FPS unless overridden here)
 
         # Audio Settings
         self.audio_codec_label = tk.Label(self.transcode_tab, text='Audio Codec:')
@@ -387,7 +388,7 @@ class VideoConverterGUI:
         # Reset internal data structures
         self.track_data = {}
         self.main_video_duration = None
-        self.main_video_params = None  # <<< RESET DATACLASS TO NONE
+        self.main_video_params = None  # Reset dataclass to None
         self.embed_ads = []
         self.banner_timecodes = []
         self.temp_files_to_clean = []
@@ -404,7 +405,7 @@ class VideoConverterGUI:
         self.output_info.delete('1.0', tk.END)
 
         # Reset potentially derived fields to defaults (or clear)
-        self.video_fps_entry.delete(0, tk.END)
+        self.video_fps_entry.delete(0, tk.END)  # <<< NO LONGER AUTO-FILLED
         self.video_codec_entry.delete(0, tk.END)
         self.video_codec_entry.insert(0, config.VIDEO_CODEC)
         self.video_preset_entry.delete(0, tk.END)
@@ -473,25 +474,23 @@ class VideoConverterGUI:
             self.master.update_idletasks()  # Show message immediately
 
             # Use a temporary FFMPEG instance for analysis
-            # We don't need custom settings for analysis, default is fine.
             ffmpeg_analyzer = ffmpeg.FFMPEG()
 
             # Populate track table and get essential parameters/duration
-            # Pass the analyzer instance to avoid creating multiple FFMPEG objects
-            self.populate_track_table(file_path, ffmpeg_analyzer)  # Also sets self.main_video_duration internally
-            self.main_video_params = ffmpeg_analyzer.get_essential_stream_params(file_path)  # <<< ASSIGN DATACLASS HERE
+            self.populate_track_table(file_path, ffmpeg_analyzer)
+            self.main_video_params = ffmpeg_analyzer.get_essential_stream_params(file_path)
 
             if not self.main_video_params:
                 warning_msg = "Could not retrieve all key parameters from the main video."
                 messagebox.showwarning("Parameter Issue", warning_msg)
                 self.output_info.insert(tk.END, f"WARNING: {warning_msg}\n")
             else:
-                # <<< USE ATTRIBUTE ACCESS FOR DATACLASS >>>
                 print("Essential video parameters retrieved:", self.main_video_params)
+                fps_display = f"{self.main_video_params.fps:.3f}" if self.main_video_params.fps else "N/A"
                 # Display basic info in the log
                 self.output_info.insert(tk.END,
                                         f"Video Params (WxH): {self.main_video_params.width}x{self.main_video_params.height}, "
-                                        f"FPS: {self.main_video_params.fps_str}, "
+                                        f"FPS: {fps_display}, "
                                         f"PixFmt: {self.main_video_params.pix_fmt}\n")
                 if self.main_video_params.has_audio:
                     self.output_info.insert(tk.END,
@@ -502,18 +501,24 @@ class VideoConverterGUI:
                     self.output_info.insert(tk.END,
                                             "Audio Params: No audio stream detected or parameters incomplete.\n")
 
-                # Check specifically for width, as it's critical
-                if self.main_video_params.width is None:
-                    error_msg = "Failed to determine video stream parameters. Please select a different file."
+                # Check specifically for width and fps, as they're critical
+                if self.main_video_params.width is None or self.main_video_params.fps is None:
+                    error_msg = "Failed to determine video stream parameters (width/height/fps). Please select a different file."
                     messagebox.showerror("Video Error", error_msg)
                     self.output_info.insert(tk.END, f"ERROR: {error_msg}\n")
-                    self._clear_state()  # Reset as the file is unusable
-                    return  # Stop further processing
+                    self._clear_state()
+                    return
 
-                # Pre-fill FPS field if available
-                if self.main_video_params.fps_str:
+                if self.main_video_params.fps is not None:
                     self.video_fps_entry.delete(0, tk.END)
-                    self.video_fps_entry.insert(0, self.main_video_params.fps_str)
+                    # Convert float fps to string for the entry field
+                    # Use a reasonable number of decimal places or just str()
+                    fps_str_for_entry = f"{self.main_video_params.fps:.3f}"  # Or just str(self.main_video_params.fps)
+                    # Handle potential integer FPS cleanly
+                    if fps_str_for_entry.endswith('.000'):
+                        fps_str_for_entry = fps_str_for_entry[:-4]
+                    self.video_fps_entry.insert(0, fps_str_for_entry)
+                    print(f"Pre-filled FPS override field with: {fps_str_for_entry}")
 
             if self.main_video_duration is None:
                 self.output_info.insert(tk.END, "WARNING: Could not determine main video duration from ffprobe.\n")
@@ -634,8 +639,9 @@ class VideoConverterGUI:
                     if stream.get('width') and stream.get('height'):
                         details.append(f"{stream.get('width')}x{stream.get('height')}")
                     if stream.get('pix_fmt'): details.append(f"{stream.get('pix_fmt')}")
-                    fps = stream.get('r_frame_rate', '?')  # Frames per second
-                    details.append(f"{fps} fps")
+                    # <<< CHANGED: Use original r_frame_rate string for display >>>
+                    fps_str_display = stream.get('r_frame_rate', '?')  # Frames per second string
+                    details.append(f"{fps_str_display} fps")
                     bitrate = stream.get('bit_rate')
                     if bitrate: details.append(f"{int(bitrate) // 1000} kb/s")
 
@@ -994,7 +1000,7 @@ class VideoConverterGUI:
         video_bitrate = self.video_bitrate_entry.get().strip() or None
         audio_codec = self.audio_codec_entry.get().strip() or None
         audio_bitrate = self.audio_bitrate_entry.get().strip() or None
-        video_fps = self.video_fps_entry.get().strip() or None
+        video_fps = self.video_fps_entry.get().strip() or None  # <<< User override string
         hwaccel = self.hwaccel_combo.get().strip() or None
         additional_encoding = self.additional_encoding_entry.get().strip() or None
         # Manual override parameter string
@@ -1028,10 +1034,10 @@ class VideoConverterGUI:
         if self.main_video_duration is None or self.main_video_duration <= 0:
             error_messages.append(
                 "- Could not determine a valid duration for the main video. Please re-select the input file.")
-        # <<< CHECK DATACLASS ATTRIBUTE >>>
-        if not self.main_video_params or self.main_video_params.width is None:
+        # <<< CHECK DATACLASS ATTRIBUTES including fps >>>
+        if not self.main_video_params or self.main_video_params.width is None or self.main_video_params.fps is None:
             error_messages.append(
-                "- Could not get essential parameters from the main video. Please re-select the input file.")
+                "- Could not get essential parameters (width/height/fps) from the main video. Please re-select the input file.")
 
         # Warnings for missing files (actual handling is done in ffmpeg_utils)
         if banner_file and not os.path.exists(banner_file):
@@ -1051,6 +1057,7 @@ class VideoConverterGUI:
 
         # 4. Create FFMPEG instance with gathered parameters
         try:
+            # <<< Pass the string 'video_fps' override from the GUI >>>
             self.ffmpeg_instance = ffmpeg.FFMPEG(
                 video_codec=video_codec,
                 video_preset=video_preset,
@@ -1058,7 +1065,7 @@ class VideoConverterGUI:
                 video_bitrate=video_bitrate,
                 audio_codec=audio_codec,
                 audio_bitrate=audio_bitrate,
-                video_fps=video_fps,
+                video_fps=video_fps,  # Pass the user override string here
                 moving_speed=moving_speed,
                 moving_logo_relative_height=moving_logo_relative_height,
                 moving_logo_alpha=moving_logo_alpha,
@@ -1077,7 +1084,7 @@ class VideoConverterGUI:
         print(f"  input_file: {input_file}")
         print(f"  output_file: {output_file}")
         print(f"  encoding_params_str (Manual Override): '{encoding_params_str}'")
-        print(f"  main_video_params: {self.main_video_params}")  # Log the dataclass
+        print(f"  main_video_params (has float fps): {self.main_video_params}")  # Log the dataclass
         print(f"  main_video_duration: {self.main_video_duration}")
         print(f"  track_data: {self.track_data}")  # Pass Dict[Dict]
         print(f"  embed_ads: {self.embed_ads}")  # Pass List[Dict]
@@ -1088,6 +1095,7 @@ class VideoConverterGUI:
         try:
             # Pass the original dictionary formats for track_data and embed_ads
             # ffmpeg_utils.generate_ffmpeg_commands expects these formats from GUI
+            # <<< The ffmpeg instance handles the float fps internally >>>
             result = self.ffmpeg_instance.generate_ffmpeg_commands(
                 input_file=input_file,
                 output_file=output_file,

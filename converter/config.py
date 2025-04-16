@@ -18,6 +18,9 @@ AUDIO_BITRATE: str = "192k"  # Default audio bitrate (e.g., "128k", "192k", "256
 MOVING_SPEED: float = 2.0  # Default speed factor for moving logo (1.0 = one cycle over video duration)
 MOVING_LOGO_RELATIVE_HEIGHT: float = 1 / 12  # Default height of moving logo relative to video height
 MOVING_LOGO_ALPHA: float = 0.5  # Default alpha transparency of moving logo (0.0 to 1.0)
+MOVING_LOGO_MOTION_BLUR: bool = True # Enable motion blur by default
+MOVING_LOGO_BLUR_INTENSITY: float = 0.5 # Controls blur strength (0=none, higher=more blur)
+
 BANNER_TRACK_PIX_FMT: str = "yuva420p"  # Default pixel format for the temporary banner track (needs alpha)
 BANNER_GAP_COLOR: str = "black@0.0"  # Default color for gaps in banner track (ffmpeg color syntax, black transparent)
 
