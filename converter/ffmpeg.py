@@ -21,7 +21,7 @@ class StreamParams:
     sar: str = '1:1'
     par: Optional[str] = None  # Note: PAR is often derived, SAR is usually more fundamental from probe
     time_base_v: Optional[str] = None
-    fps_str: Optional[str] = None
+    fps: Optional[float] = None  # <<< CHANGED: Changed from fps_str to fps (float)
     sample_rate: Optional[int] = None
     channel_layout: Optional[str] = None
     sample_fmt: Optional[str] = None
@@ -35,7 +35,7 @@ class TargetParams:
     width: Optional[int] = None
     height: Optional[int] = None
     sar: str = '1:1'
-    fps_str: Optional[str] = None
+    fps: Optional[float] = None  # <<< CHANGED: Changed from fps_str to fps (float)
     pix_fmt: str = 'yuv420p'
     v_timebase: Optional[str] = None
     sample_rate: Optional[int] = None
@@ -77,6 +77,7 @@ class FFMPEG:
                  audio_codec: Optional[str] = None,
                  audio_bitrate: Optional[str] = None,
                  video_fps: Optional[str] = None,
+                 # <<< NOTE: This remains Optional[str] as it's the user override input
                  moving_speed: Optional[float] = None,
                  moving_logo_relative_height: Optional[float] = None,
                  moving_logo_alpha: Optional[float] = None,
@@ -94,7 +95,7 @@ class FFMPEG:
             video_bitrate: Target video bitrate (e.g., '5000k', '0' to disable). Defaults to config.
             audio_codec: Target audio codec (e.g., 'aac', 'copy'). Defaults to config.
             audio_bitrate: Target audio bitrate (e.g., '192k'). Defaults to config.
-            video_fps: Target video framerate (e.g., '25', '30000/1001'). Defaults to None (no change).
+            video_fps: Target video framerate override as string (e.g., '25', '30000/1001'). Defaults to None (no override).
             moving_speed: Speed factor for moving logo animation. Defaults to config.
             moving_logo_relative_height: Height of moving logo relative to video height. Defaults to config.
             moving_logo_alpha: Alpha transparency of moving logo (0.0 to 1.0). Defaults to config.
@@ -109,7 +110,7 @@ class FFMPEG:
         self.video_bitrate = video_bitrate if video_bitrate is not None else config.VIDEO_BITRATE
         self.audio_codec = audio_codec if audio_codec is not None else config.AUDIO_CODEC
         self.audio_bitrate = audio_bitrate if audio_bitrate is not None else config.AUDIO_BITRATE
-        self.video_fps = video_fps  # Keep None if not specified, don't default
+        self.video_fps = video_fps  # Keep None if not specified, don't default. This is the STR override.
         self.moving_speed = moving_speed if moving_speed is not None else config.MOVING_SPEED
         self.moving_logo_relative_height = moving_logo_relative_height if moving_logo_relative_height is not None else config.MOVING_LOGO_RELATIVE_HEIGHT
         self.moving_logo_alpha = moving_logo_alpha if moving_logo_alpha is not None else config.MOVING_LOGO_ALPHA
@@ -237,10 +238,30 @@ class FFMPEG:
                 sar_str = stream_v.get('sample_aspect_ratio', '1:1')
                 params.sar = sar_str if ':' in sar_str and len(sar_str.split(':')) == 2 else '1:1'
                 params.time_base_v = stream_v.get('time_base')
-                params.fps_str = stream_v.get('r_frame_rate')  # Keep as string (e.g., "30000/1001")
 
-                # Check if essential video params were found
-                if all([params.width, params.height, params.fps_str, params.time_base_v]):
+                # <<< CHANGED: Get FPS string and convert to float >>>
+                fps_str = stream_v.get('r_frame_rate')
+                if fps_str and '/' in fps_str:
+                    try:
+                        num_str, den_str = fps_str.split('/')
+                        num = float(num_str)
+                        den = float(den_str)
+                        if den != 0:
+                            params.fps = num / den
+                        else:
+                            params.fps = None  # Avoid division by zero
+                    except (ValueError, TypeError):
+                        params.fps = None  # Handle parsing errors
+                elif fps_str:  # Handle integer FPS strings like "25"
+                    try:
+                        params.fps = float(fps_str)
+                    except (ValueError, TypeError):
+                        params.fps = None
+                else:
+                    params.fps = None  # No FPS string found
+
+                # Check if essential video params were found (using params.fps now)
+                if all([params.width, params.height, params.fps, params.time_base_v]):
                     has_video_stream = True
                     # Provide a default pix_fmt if missing but other params are present
                     if not params.pix_fmt: params.pix_fmt = 'yuv420p'
@@ -274,7 +295,7 @@ class FFMPEG:
                             params.width = stream_img.get('width')
                             params.height = stream_img.get('height')
                             params.pix_fmt = stream_img.get('pix_fmt', 'rgb24')  # Default for images
-                            params.fps_str = '25/1'  # Assign a default FPS for images
+                            params.fps = 25.0  # <<< CHANGED: Assign a default float FPS for images
                             params.time_base_v = '1/25'  # Assign a default timebase
                             params.sar = '1:1'  # Assume square pixels
                             print(
@@ -286,7 +307,7 @@ class FFMPEG:
                 print(f"Unexpected error handling potential image file {file_path}: {e}")
 
         # If we still lack essential video parameters, fail
-        if not all([params.width, params.height, params.fps_str]):
+        if not all([params.width, params.height, params.fps]):  # <<< CHANGED: Check params.fps
             print(f"Critical Error: Could not determine essential video parameters (width/height/fps) for {file_path}.")
             return None
 
@@ -489,7 +510,7 @@ class FFMPEG:
         target_params.width = main_video_params.width
         target_params.height = main_video_params.height
         target_params.sar = main_video_params.sar  # Already validated
-        target_params.fps_str = main_video_params.fps_str  # Keep as string
+        target_params.fps = main_video_params.fps  # <<< CHANGED: Copy float fps
         target_params.pix_fmt = main_video_params.pix_fmt or 'yuv420p'  # Already validated/defaulted
         target_params.v_timebase = main_video_params.time_base_v
         target_params.sample_rate = main_video_params.sample_rate
@@ -499,7 +520,7 @@ class FFMPEG:
         target_params.has_audio = main_video_params.has_audio
 
         # Validate that essential parameters were successfully determined from main video
-        essential_video_attrs = ['width', 'height', 'fps_str', 'pix_fmt', 'v_timebase', 'sar']
+        essential_video_attrs = ['width', 'height', 'fps', 'pix_fmt', 'v_timebase', 'sar']  # <<< CHANGED: Check 'fps'
         if not all(getattr(target_params, k, None) for k in essential_video_attrs):
             missing_v = [k for k in essential_video_attrs if not getattr(target_params, k, None)]
             raise CommandGenerationError(f"Could not determine key video parameters for compatibility: {missing_v}")
@@ -527,8 +548,8 @@ class FFMPEG:
             for k in essential_audio_attrs:
                 setattr(target_params, k, None)
 
-        print(
-            f"Target parameters determined: Res={target_params.width}x{target_params.height}, FPS={target_params.fps_str}, PixFmt={target_params.pix_fmt}, SAR={target_params.sar}, Audio={target_params.has_audio}")
+        print(  # <<< CHANGED: Log float fps
+            f"Target parameters determined: Res={target_params.width}x{target_params.height}, FPS={target_params.fps:.3f}, PixFmt={target_params.pix_fmt}, SAR={target_params.sar}, Audio={target_params.has_audio}")
         if target_params.has_audio:
             print(
                 f"  Audio Details: Rate={target_params.sample_rate}, Layout={target_params.channel_layout}, Fmt={target_params.sample_fmt}")
@@ -582,8 +603,9 @@ class FFMPEG:
                 vf_parts.append(f"setsar=sar={sar_value}")
 
         # Apply FPS conversion if requested and target FPS is set
-        if force_fps and target_params.fps_str:
-            vf_parts.append(f"fps={target_params.fps_str}")  # Force target framerate
+        # <<< CHANGED: Convert float fps back to string for the filter >>>
+        if force_fps and target_params.fps is not None:
+            vf_parts.append(f"fps={str(target_params.fps)}")  # Force target framerate
         # Ensure final pixel format
         vf_parts.append(f"format=pix_fmts={final_pix_fmt}")
         vf_string = ",".join(vf_parts)
@@ -709,7 +731,7 @@ class FFMPEG:
                 continue  # Should not happen if preprocessing logic is correct
 
             preprocessed_ad_path = cached_ad_info['temp_path']
-            ad_duration = cached_ad_info['data'].duration  # Access duration from cached AdInsertionInfo
+            ad_duration = cached_ad_info['data'].duration  # Access duration from cached data
 
             # Calculate duration of the main video segment *before* this ad
             main_segment_duration = embed_original_time_sec - last_original_time
@@ -846,13 +868,14 @@ class FFMPEG:
                 # Create a command to generate a gap video segment
                 temp_gap_path = utils.generate_temp_filename("banner_gap", segment_counter)
                 # Use lavfi color source for the gap
-                # Ensure target_params.fps_str is not None
-                if target_params.fps_str is None:
+                # <<< CHANGED: Ensure target_params.fps is not None and convert to string >>>
+                if target_params.fps is None:
                     raise CommandGenerationError("Target FPS is required for generating banner gaps.")
+                target_fps_str = str(target_params.fps)  # Convert float to string for command
                 gap_cmd_parts = [
                     "ffmpeg", "-y", "-f", "lavfi",
                     "-i",
-                    f"color=c={self.banner_gap_color}:s={banner_scaled_width}x{banner_scaled_height}:d={gap_duration:.6f}:r={target_params.fps_str}",
+                    f"color=c={self.banner_gap_color}:s={banner_scaled_width}x{banner_scaled_height}:d={gap_duration:.6f}:r={target_fps_str}",
                     # Ensure the gap also has the correct banner pixel format
                     "-vf", f"format=pix_fmts={self.banner_track_pix_fmt}",
                     # Encode gap efficiently (e.g., using lossless or near-lossless settings)
@@ -933,7 +956,11 @@ class FFMPEG:
     def _build_moving_logo_filter(self, current_video_input_label: str, moving_input_stream_label: str,
                                   target_params: TargetParams, final_duration_estimate: float) -> Tuple[
         List[str], Optional[str]]:
-        """Builds the filtergraph string parts for the moving logo overlay."""
+        """
+        Builds the filtergraph string parts for the moving logo overlay.
+        NOTE: This version includes the structure for the motion blur filter logic,
+              even though the actual implementation is pending a separate step.
+        """
         filter_parts = []
 
         print(f"  Setting up filter for moving ad (Input: {moving_input_stream_label})...")
@@ -942,10 +969,13 @@ class FFMPEG:
         # Define intermediate stream labels
         scaled_moving_stream = f"[moving_scaled_{moving_input_index}]"
         transparent_moving_stream = f"[moving_alpha_{moving_input_index}]"
-        overlay_output_label_moving = f"[v_moving_out_{moving_input_index}]"  # Final output of this filter stage
+        # Define the output label for the entire moving logo filter stage
+        final_moving_overlay_output_label = f"[v_moving_out_{moving_input_index}]"
 
         # --- Scaling ---
         main_h = target_params.height if target_params.height else 720  # Use target height or fallback
+        if not main_h:
+            raise CommandGenerationError("Cannot determine main video height for logo scaling.")
         # Calculate target logo height based on relative setting
         logo_target_h = max(1, int(main_h * self.moving_logo_relative_height))
         sar_value = target_params.sar.replace(':', '/')  # Format for setsar
@@ -987,24 +1017,16 @@ class FFMPEG:
             tv = f"mod(t,{cycle_t:.6f})"
 
             # X-coordinate expressions for each segment
-            # 0 -> t1: Move right (0 to mx)
-            x1 = f"{mx}*({tv}/{seg_dur:.6f})"
-            # t1 -> t2: Stay at right edge (mx)
-            x2 = f"{mx}"
-            # t2 -> t3: Move left (mx to 0)
-            x3 = f"{mx}*(1-(({tv}-{t2:.6f})/{seg_dur:.6f}))"
-            # t3 -> cycle_t: Stay at left edge (0)
-            x4 = "0"
+            x1 = f"{mx}*({tv}/{seg_dur:.6f})"  # 0 -> t1: Move right
+            x2 = f"{mx}"  # t1 -> t2: Stay right
+            x3 = f"{mx}*(1-(({tv}-{t2:.6f})/{seg_dur:.6f}))"  # t2 -> t3: Move left
+            x4 = "0"  # t3 -> cycle_t: Stay left
 
             # Y-coordinate expressions for each segment
-            # 0 -> t1: Stay at top (0)
-            y1 = "0"
-            # t1 -> t2: Move down (0 to my)
-            y2 = f"{my}*(({tv}-{t1:.6f})/{seg_dur:.6f})"
-            # t2 -> t3: Stay at bottom (my)
-            y3 = f"{my}"
-            # t3 -> cycle_t: Move up (my to 0)
-            y4 = f"{my}*(1-(({tv}-{t3:.6f})/{seg_dur:.6f}))"
+            y1 = "0"  # 0 -> t1: Stay top
+            y2 = f"{my}*(({tv}-{t1:.6f})/{seg_dur:.6f})"  # t1 -> t2: Move down
+            y3 = f"{my}"  # t2 -> t3: Stay bottom
+            y4 = f"{my}*(1-(({tv}-{t3:.6f})/{seg_dur:.6f}))"  # t3 -> cycle_t: Move up
 
             # Combine expressions using nested if conditions
             x_expr = f"'if(lt({tv},{t1:.6f}),{x1},if(lt({tv},{t2:.6f}),{x2},if(lt({tv},{t3:.6f}),{x3},{x4})))'"
@@ -1014,17 +1036,27 @@ class FFMPEG:
             print(
                 f"    Warning: Animation cycle duration ({cycle_t:.3f}s) is too short, logo will be static at top-left.")
 
-        # Build the overlay filter
+        # --- [PLACEHOLDER for Motion Blur Logic] ---
+        # Future implementation:
+        # 1. Create an intermediate video with the logo moving on transparent bg using x_expr, y_expr.
+        # 2. Apply tblend or minterpolate to this intermediate video. Calculations will use target_params.fps (float).
+        #    - Need to calculate 'frames' for tblend based on movement distance/fps.
+        #    - Example: blur_frames = max(1, round(target_params.fps / ( (target_params.width / cycle_t) * safety_factor )))
+        # 3. The input to the final overlay below would be the *blurred* intermediate stream.
+        # For now, we proceed without blur, using the transparent logo stream directly.
+
+        # --- Final Overlay ---
+        # Build the overlay filter using the non-blurred, transparent logo stream for now.
         # Inputs: [current video stream], [transparent logo stream]
-        # Outputs: [overlay_output_label_moving]
+        # Outputs: [final_moving_overlay_output_label]
         # shortest=0: Ensure overlay lasts the duration of the main video stream
         overlay_filter = (f"{current_video_input_label}{transparent_moving_stream}"
                           f"overlay=x={x_expr}:y={y_expr}:shortest=0"
-                          f"{overlay_output_label_moving}")
+                          f"{final_moving_overlay_output_label}")
         filter_parts.append(overlay_filter)
 
         # The output label of this stage becomes the input for the next
-        next_video_output_label = overlay_output_label_moving
+        next_video_output_label = final_moving_overlay_output_label
         print(f"    Overlay filter for moving ad added. Output: {next_video_output_label}")
         return filter_parts, next_video_output_label
 
@@ -1099,6 +1131,7 @@ class FFMPEG:
             try:
                 moving_input_stream_label = f"[{moving_input_idx}:v]"  # Input label for logo stream
                 # Call helper to build logo filter parts, using the *output* of the previous stage as input
+                # <<< NOTE: This call uses the float target_params.fps internally for potential future blur calc >>>
                 logo_filters, last_video_label_after_logo = self._build_moving_logo_filter(
                     last_filter_video_label,  # Input is the output of banner overlay (or base video)
                     moving_input_stream_label,  # Input is the logo file stream
@@ -1143,11 +1176,12 @@ class FFMPEG:
         base_audio_specifier = "0:a:0?" if target_params.has_audio else None
         subtitle_input_specifier = None
         metadata_input_index = 0
+        primary_input_options: List[str] = []  # Initialize with default empty list
 
         if is_concat_mode:
             if not concat_list_path or not os.path.exists(concat_list_path):
                 raise CommandGenerationError("Concat list file (main video + ads) not found or provided.")
-            primary_input_options = ["-f", "concat", "-safe", "0"]
+            primary_input_options = ["-f", "concat", "-safe", "0"]  # Overwrite if concat mode
             primary_input_path = concat_list_path
             print(f"Mode: Concatenation. Input 0 (Video/Audio): {os.path.basename(concat_list_path)}")
 
@@ -1155,10 +1189,11 @@ class FFMPEG:
             original_info = self.get_stream_info(input_file)
             if any(s.get('codec_type') == 'subtitle' for s in original_info.get("streams", [])):
                 print(f"  Input 1 (Subs/Metadata Source): {os.path.basename(input_file)}")
-                input_definitions.append(([], input_file))
+                input_definitions.append(([], input_file))  # Metadata source has no specific options here
                 subtitle_input_specifier = "1:s?"
                 metadata_input_index = 1
         else:
+            # primary_input_options remains [] (initialized above)
             primary_input_path = input_file
             metadata_input_index = 0
             original_info = self.get_stream_info(input_file)
@@ -1167,14 +1202,16 @@ class FFMPEG:
             print(f"Mode: Direct Conversion. Input 0 (Video/Audio/Subs/Metadata): {os.path.basename(input_file)}")
 
         # Add the primary video/audio input (either file or concat list)
-        input_definitions.insert(0, (primary_input_options if is_concat_mode else [], primary_input_path))
+        # Now primary_input_options is guaranteed to be defined
+        input_definitions.insert(0, (primary_input_options, primary_input_path))
 
         current_input_index = len(input_definitions)
         banner_track_input_idx = None
         if concatenated_banner_track_path:
             print(
                 f"  Input {current_input_index} (Concatenated Banner Track): {os.path.basename(concatenated_banner_track_path)}")
-            input_definitions.append(([], concatenated_banner_track_path))
+            input_definitions.append(
+                ([], concatenated_banner_track_path))  # Banner track needs no specific options here
             banner_track_input_idx = current_input_index
             current_input_index += 1
 
@@ -1182,8 +1219,8 @@ class FFMPEG:
         if moving_file and os.path.exists(moving_file):
             moving_options = ["-loop", "1"]
             # If moving file is an image, set its frame rate to match target
-            if self.get_media_duration(moving_file) is None and target_params.fps_str:
-                moving_options.extend(["-r", target_params.fps_str])
+            if self.get_media_duration(moving_file) is None and target_params.fps is not None:
+                moving_options.extend(["-r", str(target_params.fps)])
             print(f"  Input {current_input_index} (Moving Logo): {os.path.basename(moving_file)}")
             input_definitions.append((moving_options, moving_file))
             moving_input_idx = current_input_index
@@ -1382,10 +1419,12 @@ class FFMPEG:
                 if self.audio_bitrate and self.audio_codec != 'copy':
                     main_cmd_parts.extend(['-b:a', self.audio_bitrate])
 
-            # Video FPS (optional override)
+            # Video FPS (optional override from GUI/config using self.video_fps string)
+            # <<< CHANGED: Use the string override directly >>>
             if self.video_fps:
-                print(f"    Video: Target FPS={self.video_fps}")
-                main_cmd_parts.extend(['-r', self.video_fps])  # Note: -r applies to output stream
+                print(f"    Video: Target FPS Override (user input)={self.video_fps}")
+                # Use the original string from user input for the -r option
+                main_cmd_parts.extend(['-r', self.video_fps])
 
             # Additional user-defined parameters
             if self.additional_encoding:
@@ -1445,7 +1484,7 @@ class FFMPEG:
 
     def _generate_main_ffmpeg_command(self,
                                       input_file: str, output_file: str, encoding_params_str: str,
-                                      target_params: TargetParams,
+                                      target_params: TargetParams,  # <<< Accepts TargetParams with float fps
                                       main_video_duration: float, track_data_dict: Dict[str, Dict[str, str]],
                                       # Input from GUI
                                       concatenated_banner_track_path: Optional[str],
@@ -1467,6 +1506,7 @@ class FFMPEG:
         print(f"Estimated final duration: {final_duration_estimate:.3f}s")
 
         # Step 3.1: Define Inputs
+        # <<< CHANGED: Calls _define_main_command_inputs which now uses target_params.fps (float) internally >>>
         input_definitions, base_video_specifier, base_audio_specifier, \
             subtitle_input_specifier, banner_track_input_idx, moving_input_idx, \
             metadata_input_index = self._define_main_command_inputs(
@@ -1479,6 +1519,7 @@ class FFMPEG:
             main_cmd_parts.extend(["-i", f'"{path}"'])
 
         # Step 3.2: Build Filter Complex
+        # <<< CHANGED: Calls _build_filter_complex which now uses target_params.fps (float) internally >>>
         filter_complex_str, final_video_map_label, final_audio_map_label = self._build_filter_complex(
             base_video_specifier.rstrip('?'),  # Provide base specifier without '?' for filter input label
             base_audio_specifier.rstrip('?') if base_audio_specifier else None,
@@ -1492,6 +1533,7 @@ class FFMPEG:
         )
 
         # Step 3.3: Apply Filters and Mapping (modifies main_cmd_parts in place)
+        # <<< No change needed here, just passes params through >>>
         map_commands = self._apply_filters_and_mapping(
             main_cmd_parts, filter_complex_str, final_video_map_label, final_audio_map_label,
             base_video_specifier, base_audio_specifier, subtitle_input_specifier, target_params
@@ -1509,6 +1551,7 @@ class FFMPEG:
         )
 
         # Step 3.5: Build Encoding Parameters (modifies main_cmd_parts in place)
+        # <<< CHANGED: Uses self.video_fps (string override) correctly >>>
         self._build_encoding_parameters(main_cmd_parts, encoding_params_str, map_commands)
 
         # Step 3.6: Finalize Command (Duration, Output, Flags - modifies main_cmd_parts in place)
@@ -1557,6 +1600,7 @@ class FFMPEG:
         concat_list_path_main = None
 
         print("--- Getting Main Video Parameters ---")
+        # <<< CHANGED: get_essential_stream_params now returns StreamParams with float fps >>>
         main_video_params: Optional[StreamParams] = self.get_essential_stream_params(input_file)
         if not main_video_params:
             raise CommandGenerationError(f"Could not get essential parameters from: {input_file}")
@@ -1565,6 +1609,7 @@ class FFMPEG:
         print("--- Validating and Preparing Inputs ---")
         try:
             # _validate_and_prepare_inputs returns dataclasses StreamParams and List[AdInsertionInfo]
+            # <<< CHANGED: main_video_params is now StreamParams with float fps >>>
             valid_params, valid_duration, sorted_embed_ads_info, \
                 valid_banner_file, valid_banner_timecodes, valid_moving_file, \
                 original_banner_duration = self._validate_and_prepare_inputs(
@@ -1574,7 +1619,7 @@ class FFMPEG:
             banner_file = valid_banner_file
             banner_timecodes = valid_banner_timecodes
             moving_file = valid_moving_file
-            main_video_params = valid_params  # Now a StreamParams object
+            main_video_params = valid_params  # Now a StreamParams object with float fps
             main_video_duration = valid_duration
             # sorted_embed_ads_info is now List[AdInsertionInfo]
         except CommandGenerationError as e:
@@ -1582,6 +1627,7 @@ class FFMPEG:
             raise
 
         print("--- Determining Target Encoding Parameters ---")
+        # <<< CHANGED: _determine_target_parameters now takes/returns params with float fps >>>
         target_params: TargetParams = self._determine_target_parameters(main_video_params)
 
         is_concat_mode = bool(sorted_embed_ads_info)
@@ -1593,6 +1639,7 @@ class FFMPEG:
         # Generate preprocessing for concatenation if needed
         if is_concat_mode:
             try:
+                # <<< CHANGED: Passes target_params with float fps internally >>>
                 prep_cmds_main, concat_list_path_main, prep_temp_files_main, _ = \
                     self._generate_preprocessing_for_concat(
                         input_file, sorted_embed_ads_info, target_params, main_video_duration
@@ -1609,6 +1656,7 @@ class FFMPEG:
         # Generate preprocessing for banner track if needed
         if banner_file and banner_timecodes and original_banner_duration is not None:
             try:
+                # <<< CHANGED: Passes target_params with float fps internally >>>
                 prep_cmds_banner, _, prep_temp_files_banner, concatenated_banner_path = \
                     self._generate_banner_preprocessing_commands(
                         banner_file, banner_timecodes, original_banner_duration, target_params,
@@ -1631,11 +1679,12 @@ class FFMPEG:
 
         print("--- Generating Main FFmpeg Command ---")
         try:
+            # <<< CHANGED: Passes target_params (with float fps) and sorted_embed_ads_info >>>
             main_command, main_temp_files = self._generate_main_ffmpeg_command(
                 input_file=input_file,
                 output_file=output_file,
                 encoding_params_str=encoding_params_str,
-                target_params=target_params,  # Pass TargetParams
+                target_params=target_params,  # Pass TargetParams with float fps
                 main_video_duration=main_video_duration,
                 track_data_dict=track_data,  # Pass original Dict[Dict]
                 concatenated_banner_track_path=concatenated_banner_track_path,
