@@ -1,10 +1,11 @@
 # converter/gui.py
+import json  # Import json module
 import os
 import subprocess
 import time
 import tkinter as tk
 from tkinter import ttk, filedialog, simpledialog, messagebox
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Optional, Any, Set
 
 # Import local modules
 from . import ffmpeg, utils, config
@@ -26,7 +27,7 @@ class VideoConverterGUI:
             master: The root Tkinter window.
         """
         self.master = master
-        self.VERSION = '0.1.0'
+        self.VERSION = '0.1.3'
         self.TITLE = "JustConverter + AdBurner"
         self.AUTHOR = "dimnissv"
         master.title(f'{self.TITLE} ({self.AUTHOR}) {self.VERSION}')
@@ -39,18 +40,15 @@ class VideoConverterGUI:
         self.transcode_tab = ttk.Frame(self.notebook)
         self.start_tab = ttk.Frame(self.notebook)
         self.about_tab = ttk.Frame(self.notebook)
+        # Planned: self.settings_tab = ttk.Frame(self.notebook)
 
         # State variables
-        # Keep track_data and embed_ads as Dict/List[Dict] as they are primarily
-        # populated by user interactions before being passed to ffmpeg_utils,
-        # which handles the conversion to dataclasses internally if needed.
-        self.track_data: Dict[str, Dict[str, str]] = {}  # Stores user edits {track_id: {key: value}}
-        self.main_video_duration: Optional[float] = None  # Duration of the input video in seconds
-        # Use StreamParams dataclass for main video parameters after analysis
-        self.main_video_params: Optional[StreamParams] = None  # <<< Has float fps attribute
-        self.embed_ads: List[Dict[str, Any]] = []  # List of ads {'path': str, 'timecode': str, 'duration': float}
-        self.banner_timecodes: List[str] = []  # List of timecodes (MM:SS) for banner display
-        self.temp_files_to_clean: List[str] = []  # List of temporary files generated
+        self.track_data: Dict[str, Dict[str, str]] = {}
+        self.main_video_duration: Optional[float] = None
+        self.main_video_params: Optional[StreamParams] = None
+        self.embed_ads: List[Dict[str, Any]] = []
+        self.banner_timecodes: List[str] = []
+        self.temp_files_to_clean: List[str] = []
 
         # Build UI elements for each tab
         self._create_main_tab_widgets()
@@ -58,6 +56,7 @@ class VideoConverterGUI:
         self._create_transcode_tab_widgets()
         self._create_start_tab_widgets()
         self._create_about_tab_widgets()
+        # Planned: self._create_settings_tab_widgets()
 
         # Add tabs to the notebook
         self.notebook.add(self.main_tab, text="Files")
@@ -65,15 +64,20 @@ class VideoConverterGUI:
         self.notebook.add(self.transcode_tab, text="Transcoding")
         self.notebook.add(self.start_tab, text="Start")
         self.notebook.add(self.about_tab, text="About")
+        # Planned: self.notebook.add(self.settings_tab, text="Settings")
 
         self.notebook.grid(row=0, column=0, sticky="nsew")
         master.grid_rowconfigure(0, weight=1)
         master.grid_columnconfigure(0, weight=1)
 
+        # Load settings after widgets are created
+        self._load_settings()
+
         # Handle window closing
         master.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.ffmpeg_instance: Optional[ffmpeg.FFMPEG] = None  # Instance of the ffmpeg helper class
+        self.ffmpeg_instance: Optional[ffmpeg.FFMPEG] = None
 
+    # ... (Keep other _create_..._tab_widgets methods as they are) ...
     def _create_main_tab_widgets(self) -> None:
         """Creates widgets for the 'Files' tab."""
         self.input_file_label = tk.Label(self.main_tab, text="Input File:")
@@ -173,13 +177,13 @@ class VideoConverterGUI:
         self.banner_track_pix_fmt_label.grid(row=6, column=0, padx=5, pady=5, sticky='w')
         self.banner_track_pix_fmt_entry = tk.Entry(self.advertisement_tab, width=15)
         self.banner_track_pix_fmt_entry.grid(row=6, column=1, padx=5, pady=5, sticky='w')
-        self.banner_track_pix_fmt_entry.insert(0, config.BANNER_TRACK_PIX_FMT)  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         self.banner_gap_color_label = tk.Label(self.advertisement_tab, text='Banner Gap Color:')
         self.banner_gap_color_label.grid(row=7, column=0, padx=5, pady=5, sticky='w')
         self.banner_gap_color_entry = tk.Entry(self.advertisement_tab, width=15)
         self.banner_gap_color_entry.grid(row=7, column=1, padx=5, pady=5, sticky='w')
-        self.banner_gap_color_entry.insert(0, config.BANNER_GAP_COLOR)  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         # --- Moving Logo ---
         self.moving_file_label = tk.Label(self.advertisement_tab, text="Moving Logo (Image):")
@@ -196,20 +200,19 @@ class VideoConverterGUI:
         self.moving_speed_label.grid(row=9, column=0, padx=5, pady=5, sticky="w")
         self.moving_speed_entry = tk.Entry(self.advertisement_tab, width=10)
         self.moving_speed_entry.grid(row=9, column=1, padx=5, pady=5, sticky="w")
-        self.moving_speed_entry.insert(0, str(config.MOVING_SPEED))  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         self.moving_logo_relative_height_label = tk.Label(self.advertisement_tab, text="Logo Height (Relative):")
         self.moving_logo_relative_height_label.grid(row=10, column=0, padx=5, pady=5, sticky="w")
         self.moving_logo_relative_height_entry = tk.Entry(self.advertisement_tab, width=10)
         self.moving_logo_relative_height_entry.grid(row=10, column=1, padx=5, pady=5, sticky="w")
-        self.moving_logo_relative_height_entry.insert(0,
-                                                      f"{config.MOVING_LOGO_RELATIVE_HEIGHT:.3f}")  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         self.moving_logo_alpha_label = tk.Label(self.advertisement_tab, text="Logo Alpha (0.0-1.0):")
         self.moving_logo_alpha_label.grid(row=11, column=0, padx=5, pady=5, sticky="w")
         self.moving_logo_alpha_entry = tk.Entry(self.advertisement_tab, width=10)
         self.moving_logo_alpha_entry.grid(row=11, column=1, padx=5, pady=5, sticky="w")
-        self.moving_logo_alpha_entry.insert(0, str(config.MOVING_LOGO_ALPHA))  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
     def _create_transcode_tab_widgets(self) -> None:
         """Creates widgets for the 'Transcoding' tab."""
@@ -218,67 +221,66 @@ class VideoConverterGUI:
         self.video_codec_label.grid(row=0, column=0, padx=5, pady=5, sticky='w')
         self.video_codec_entry = tk.Entry(self.transcode_tab, width=20)
         self.video_codec_entry.grid(row=0, column=1, padx=5, pady=5, sticky='w')
-        self.video_codec_entry.insert(0, config.VIDEO_CODEC)  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         self.video_preset_label = tk.Label(self.transcode_tab, text='Preset:')
         self.video_preset_label.grid(row=1, column=0, padx=5, pady=5, sticky='w')
         self.video_preset_entry = tk.Entry(self.transcode_tab, width=20)
         self.video_preset_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
-        self.video_preset_entry.insert(0, config.VIDEO_PRESET)  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         self.video_cq_label = tk.Label(self.transcode_tab, text='CQ/CRF (Quality):')
         self.video_cq_label.grid(row=2, column=0, padx=5, pady=5, sticky='w')
         self.video_cq_entry = tk.Entry(self.transcode_tab, width=20)
         self.video_cq_entry.grid(row=2, column=1, padx=5, pady=5, sticky='w')
-        self.video_cq_entry.insert(0, config.VIDEO_CQ)  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         self.video_bitrate_label = tk.Label(self.transcode_tab, text='Video Bitrate (e.g., 5000k, 0=CQ):')
         self.video_bitrate_label.grid(row=3, column=0, padx=5, pady=5, sticky='w')
         self.video_bitrate_entry = tk.Entry(self.transcode_tab, width=20)
         self.video_bitrate_entry.grid(row=3, column=1, padx=5, pady=5, sticky='w')
-        self.video_bitrate_entry.insert(0, config.VIDEO_BITRATE)  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
-        self.video_fps_label = tk.Label(self.transcode_tab,
-                                        text='Video FPS (Optional Override):')  # <<< CLARIFIED LABEL
+        self.video_fps_label = tk.Label(self.transcode_tab, text='Video FPS (Optional Override):')
         self.video_fps_label.grid(row=4, column=0, padx=5, pady=5, sticky='w')
         self.video_fps_entry = tk.Entry(self.transcode_tab, width=20)
         self.video_fps_entry.grid(row=4, column=1, padx=5, pady=5, sticky='w')
-        # Default FPS is blank (uses source FPS unless overridden here)
+        # Value loaded/set by _load_settings or defaults (or after analysis)
 
         # Audio Settings
         self.audio_codec_label = tk.Label(self.transcode_tab, text='Audio Codec:')
         self.audio_codec_label.grid(row=5, column=0, padx=5, pady=5, sticky='w')
         self.audio_codec_entry = tk.Entry(self.transcode_tab, width=20)
         self.audio_codec_entry.grid(row=5, column=1, padx=5, pady=5, sticky='w')
-        self.audio_codec_entry.insert(0, config.AUDIO_CODEC)  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         self.audio_bitrate_label = tk.Label(self.transcode_tab, text='Audio Bitrate (e.g., 192k):')
         self.audio_bitrate_label.grid(row=6, column=0, padx=5, pady=5, sticky='w')
         self.audio_bitrate_entry = tk.Entry(self.transcode_tab, width=20)
         self.audio_bitrate_entry.grid(row=6, column=1, padx=5, pady=5, sticky='w')
-        self.audio_bitrate_entry.insert(0, config.AUDIO_BITRATE)  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         # Hardware Acceleration
         self.hwaccel_label = tk.Label(self.transcode_tab, text="Hardware Acceleration:")
         self.hwaccel_label.grid(row=7, column=0, padx=5, pady=5, sticky="w")
-        self.hwaccel_combo = ttk.Combobox(self.transcode_tab, values=["none"] + self.detect_hwaccels(),
+        self.hwaccel_combo = ttk.Combobox(self.transcode_tab, values=self.detect_hwaccels(),
                                           state="readonly")
         self.hwaccel_combo.grid(row=7, column=1, padx=5, pady=5, sticky="w")
-        self.hwaccel_combo.set(config.HWACCEL)  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         # Additional Parameters
         self.additional_encoding_label = tk.Label(self.transcode_tab, text="Additional Params:")
         self.additional_encoding_label.grid(row=8, column=0, padx=5, pady=5, sticky="w")
         self.additional_encoding_entry = tk.Entry(self.transcode_tab, width=60)
         self.additional_encoding_entry.grid(row=8, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
-        self.additional_encoding_entry.insert(0, config.ADDITIONAL_ENCODING)  # Default from config
+        # Value loaded/set by _load_settings or defaults
 
         # Manual Override
         self.encoding_label = tk.Label(self.transcode_tab, text="Manual Params (Overrides Above):")
         self.encoding_label.grid(row=9, column=0, padx=5, pady=5, sticky="w")
         self.encoding_entry = tk.Entry(self.transcode_tab, width=60)
         self.encoding_entry.grid(row=9, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
-        # Default is empty
+        # Manual entry, not usually saved/loaded by default unless specified
 
         # Configure resizing
         self.transcode_tab.grid_columnconfigure(1, weight=1)
@@ -358,8 +360,9 @@ class VideoConverterGUI:
             messagebox.showerror("Error", f"Could not open link:\n{e}")
 
     def on_closing(self) -> None:
-        """Handles the window close event, ensuring temporary files are cleaned up."""
-        print("Close requested. Cleaning up temporary files...")
+        """Handles the window close event, ensuring temporary files are cleaned up and settings saved."""
+        print("Close requested. Saving settings and cleaning up temporary files...")
+        self._save_settings()  # Save settings before closing
         self.cleanup_temp_files()
         self.master.destroy()
 
@@ -367,33 +370,33 @@ class VideoConverterGUI:
         """Calls the utility function to clean up temporary files."""
         if self.temp_files_to_clean:
             utils.cleanup_temp_files(self.temp_files_to_clean)
-            self.temp_files_to_clean.clear()  # Clear the list after attempting cleanup
+            self.temp_files_to_clean.clear()
         else:
             print("No temporary files to clean.")
 
     def _clear_state(self) -> None:
-        """Resets the GUI state, clearing inputs and internal data."""
-        print("Resetting GUI state...")
-        self.cleanup_temp_files()  # Clean up any remnants first
+        """Resets the GUI state, clearing inputs and internal data. Does NOT reset saved settings fields."""
+        print("Resetting GUI state (excluding saved settings fields)...")
+        self.cleanup_temp_files()
 
-        # Clear input fields
+        # Clear input/output files
         self.input_file_entry.delete(0, tk.END)
         self.output_file_entry.delete(0, tk.END)
-        self.embed_file_entry.delete(0, tk.END)
-        self.embed_timecodes_entry.delete(0, tk.END)
-        self.banner_file_entry.delete(0, tk.END)
-        self.banner_timecodes_entry.delete(0, tk.END)
-        self.moving_file_entry.delete(0, tk.END)
 
-        # Reset internal data structures
+        # Clear state variables related to the specific conversion
         self.track_data = {}
         self.main_video_duration = None
-        self.main_video_params = None  # Reset dataclass to None
+        self.main_video_params = None
         self.embed_ads = []
         self.banner_timecodes = []
         self.temp_files_to_clean = []
 
-        # Clear listboxes
+        # Clear listboxes and ad file entries
+        self.embed_file_entry.delete(0, tk.END)  # Clear ad files as they are specific to input
+        self.banner_file_entry.delete(0, tk.END)
+        self.moving_file_entry.delete(0, tk.END)
+        self.embed_timecodes_entry.delete(0, tk.END)
+        self.banner_timecodes_entry.delete(0, tk.END)
         self.embed_timecodes_listbox.delete(0, tk.END)
         self.banner_timecodes_listbox.delete(0, tk.END)
 
@@ -404,38 +407,158 @@ class VideoConverterGUI:
         # Clear output log
         self.output_info.delete('1.0', tk.END)
 
-        # Reset potentially derived fields to defaults (or clear)
-        self.video_fps_entry.delete(0, tk.END)  # <<< NO LONGER AUTO-FILLED
-        self.video_codec_entry.delete(0, tk.END)
-        self.video_codec_entry.insert(0, config.VIDEO_CODEC)
-        self.video_preset_entry.delete(0, tk.END)
-        self.video_preset_entry.insert(0, config.VIDEO_PRESET)
-        self.video_cq_entry.delete(0, tk.END)
-        self.video_cq_entry.insert(0, config.VIDEO_CQ)
-        self.video_bitrate_entry.delete(0, tk.END)
-        self.video_bitrate_entry.insert(0, config.VIDEO_BITRATE)
-        self.audio_codec_entry.delete(0, tk.END)
-        self.audio_codec_entry.insert(0, config.AUDIO_CODEC)
-        self.audio_bitrate_entry.delete(0, tk.END)
-        self.audio_bitrate_entry.insert(0, config.AUDIO_BITRATE)
-        self.hwaccel_combo.set(config.HWACCEL)
-        self.additional_encoding_entry.delete(0, tk.END)
-        self.additional_encoding_entry.insert(0, config.ADDITIONAL_ENCODING)
-        self.encoding_entry.delete(0, tk.END)
-        # Reset Ad settings
-        self.banner_track_pix_fmt_entry.delete(0, tk.END)
-        self.banner_track_pix_fmt_entry.insert(0, config.BANNER_TRACK_PIX_FMT)
-        self.banner_gap_color_entry.delete(0, tk.END)
-        self.banner_gap_color_entry.insert(0, config.BANNER_GAP_COLOR)
-        self.moving_speed_entry.delete(0, tk.END)
-        self.moving_speed_entry.insert(0, str(config.MOVING_SPEED))
-        self.moving_logo_relative_height_entry.delete(0, tk.END)
-        self.moving_logo_relative_height_entry.insert(0, f"{config.MOVING_LOGO_RELATIVE_HEIGHT:.3f}")
-        self.moving_logo_alpha_entry.delete(0, tk.END)
-        self.moving_logo_alpha_entry.insert(0, str(config.MOVING_LOGO_ALPHA))
+        # DO NOT reset the Advertisement and Transcoding fields here,
+        # as they should retain their values from _load_settings() or user edits.
+        # Only fields specific to a single run (like input/output file) are cleared.
 
-        self.master.update_idletasks()  # Ensure UI updates
-        print("State reset complete.")
+        self.master.update_idletasks()
+        print("Partial state reset complete.")
+
+    def _load_settings(self) -> None:
+        """Loads settings from the JSON file and populates the GUI fields."""
+        settings = {}
+        settings_file_path = config.SETTINGS_FILENAME
+        defaults = {
+            # Transcoding Tab
+            "video_codec": config.VIDEO_CODEC,
+            "video_preset": config.VIDEO_PRESET,
+            "video_cq": config.VIDEO_CQ,
+            "video_bitrate": config.VIDEO_BITRATE,
+            "video_fps": "",  # Default FPS override is empty
+            "audio_codec": config.AUDIO_CODEC,
+            "audio_bitrate": config.AUDIO_BITRATE,
+            "hwaccel": config.HWACCEL,
+            "additional_encoding": config.ADDITIONAL_ENCODING,
+            # Advertisement Tab (paths are generally not saved, only parameters)
+            "banner_track_pix_fmt": config.BANNER_TRACK_PIX_FMT,
+            "banner_gap_color": config.BANNER_GAP_COLOR,
+            "moving_speed": str(config.MOVING_SPEED),
+            "moving_logo_relative_height": f"{config.MOVING_LOGO_RELATIVE_HEIGHT:.3f}",
+            "moving_logo_alpha": str(config.MOVING_LOGO_ALPHA),
+        }
+
+        try:
+            if os.path.exists(settings_file_path):
+                with open(settings_file_path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                print(f"Loaded settings from {settings_file_path}")
+            else:
+                print(f"Settings file not found ({settings_file_path}). Using defaults.")
+                settings = defaults  # Use defaults if file doesn't exist
+        except (json.JSONDecodeError, IOError, Exception) as e:
+            print(f"Error loading settings from {settings_file_path}: {e}. Using defaults.")
+            settings = defaults  # Use defaults on error
+
+        # --- Helper to safely set widget values ---
+        def set_widget_value(widget, value):
+            # <<< No changes needed inside the helper itself >>>
+            if widget is None: return
+            try:
+                if isinstance(widget, ttk.Combobox):
+                    # Ensure the value exists in the combobox list before setting
+                    if value in widget['values']:
+                        widget.set(str(value))
+                    else:
+                        print(f"Warning: Value '{value}' not found in Combobox options. Using default.")
+                        # Attempt to set default from config if possible
+                        # Now widget.settings_key should exist
+                        default_val = defaults.get(widget.settings_key, "")
+                        if default_val in widget['values']:
+                            widget.set(default_val)
+                        else:
+                            widget.set(widget['values'][0] if widget['values'] else "")  # Fallback
+                elif isinstance(widget, tk.Entry):
+                    widget.delete(0, tk.END)
+                    widget.insert(0, str(value))  # Ensure string conversion
+            except Exception as e:
+                print(f"Error setting widget value '{value}': {e}")
+
+        # --- Map settings keys to widgets ---
+        widget_map = {
+            # Transcoding Tab
+            "video_codec": getattr(self, 'video_codec_entry', None),
+            "video_preset": getattr(self, 'video_preset_entry', None),
+            "video_cq": getattr(self, 'video_cq_entry', None),
+            "video_bitrate": getattr(self, 'video_bitrate_entry', None),
+            "video_fps": getattr(self, 'video_fps_entry', None),
+            "audio_codec": getattr(self, 'audio_codec_entry', None),
+            "audio_bitrate": getattr(self, 'audio_bitrate_entry', None),
+            "hwaccel": getattr(self, 'hwaccel_combo', None),
+            "additional_encoding": getattr(self, 'additional_encoding_entry', None),
+            # Advertisement Tab
+            "banner_track_pix_fmt": getattr(self, 'banner_track_pix_fmt_entry', None),
+            "banner_gap_color": getattr(self, 'banner_gap_color_entry', None),
+            "moving_speed": getattr(self, 'moving_speed_entry', None),
+            "moving_logo_relative_height": getattr(self, 'moving_logo_relative_height_entry', None),
+            "moving_logo_alpha": getattr(self, 'moving_logo_alpha_entry', None),
+        }
+
+        # --- Populate widgets ---
+        applied_settings = 0
+        for key, widget in widget_map.items():
+            if widget:
+                # <<< FIXED: Assign the settings key BEFORE calling set_widget_value >>>
+                widget.settings_key = key
+                # Get value from loaded settings, fallback to defaults dict
+                value_to_set = settings.get(key, defaults.get(key, ""))
+                set_widget_value(widget, value_to_set)  # Now helper can use widget.settings_key
+                applied_settings += 1
+            else:
+                print(f"Warning: Widget for setting '{key}' not found during load.")
+
+        print(f"Applied {applied_settings} settings to GUI widgets.")
+
+    def _save_settings(self) -> None:
+        """Saves current settings from GUI fields to the JSON file."""
+        settings_to_save = {}
+        settings_file_path = config.SETTINGS_FILENAME
+
+        # --- Map settings keys to widgets (similar to load) ---
+        widget_map = {
+            # Transcoding Tab
+            "video_codec": getattr(self, 'video_codec_entry', None),
+            "video_preset": getattr(self, 'video_preset_entry', None),
+            "video_cq": getattr(self, 'video_cq_entry', None),
+            "video_bitrate": getattr(self, 'video_bitrate_entry', None),
+            "video_fps": getattr(self, 'video_fps_entry', None),
+            "audio_codec": getattr(self, 'audio_codec_entry', None),
+            "audio_bitrate": getattr(self, 'audio_bitrate_entry', None),
+            "hwaccel": getattr(self, 'hwaccel_combo', None),
+            "additional_encoding": getattr(self, 'additional_encoding_entry', None),
+            # Advertisement Tab
+            "banner_track_pix_fmt": getattr(self, 'banner_track_pix_fmt_entry', None),
+            "banner_gap_color": getattr(self, 'banner_gap_color_entry', None),
+            "moving_speed": getattr(self, 'moving_speed_entry', None),
+            "moving_logo_relative_height": getattr(self, 'moving_logo_relative_height_entry', None),
+            "moving_logo_alpha": getattr(self, 'moving_logo_alpha_entry', None),
+        }
+
+        # --- Collect values from widgets ---
+        collected_count = 0
+        for key, widget in widget_map.items():
+            if widget:
+                try:
+                    value = widget.get().strip()
+                    settings_to_save[key] = value
+                    collected_count += 1
+                except Exception as e:
+                    print(f"Error getting value from widget for '{key}': {e}")
+            else:
+                print(f"Warning: Widget for setting '{key}' not found during save.")
+
+        # --- Write to JSON file ---
+        if not settings_to_save:
+            print("No settings collected to save.")
+            return
+
+        try:
+            with open(settings_file_path, 'w', encoding='utf-8') as f:
+                json.dump(settings_to_save, f, indent=4, ensure_ascii=False)
+            print(f"Saved {collected_count} settings to {settings_file_path}")
+        except (IOError, TypeError, Exception) as e:
+            print(f"Error saving settings to {settings_file_path}: {e}")
+            # Optionally show an error message to the user
+            # messagebox.showerror("Settings Error", f"Failed to save settings:\n{e}")
 
     def browse_input_file(self) -> None:
         """Handles browsing for and selecting the input video file."""
@@ -509,16 +632,24 @@ class VideoConverterGUI:
                     self._clear_state()
                     return
 
+                # Pre-fill FPS override field with detected value
                 if self.main_video_params.fps is not None:
-                    self.video_fps_entry.delete(0, tk.END)
-                    # Convert float fps to string for the entry field
-                    # Use a reasonable number of decimal places or just str()
-                    fps_str_for_entry = f"{self.main_video_params.fps:.3f}"  # Or just str(self.main_video_params.fps)
-                    # Handle potential integer FPS cleanly
-                    if fps_str_for_entry.endswith('.000'):
-                        fps_str_for_entry = fps_str_for_entry[:-4]
-                    self.video_fps_entry.insert(0, fps_str_for_entry)
-                    print(f"Pre-filled FPS override field with: {fps_str_for_entry}")
+                    # Avoid overwriting if the field already has a *different* value
+                    # (which might have been loaded from settings or entered manually)
+                    current_fps_entry_val = self.video_fps_entry.get().strip()
+                    detected_fps_str = f"{self.main_video_params.fps:.3f}"
+                    if detected_fps_str.endswith('.000'):
+                        detected_fps_str = detected_fps_str[:-4]
+
+                    # Only update if entry is empty or matches the old default (which is empty)
+                    if not current_fps_entry_val:
+                        self.video_fps_entry.delete(0, tk.END)
+                        self.video_fps_entry.insert(0, detected_fps_str)
+                        print(f"Pre-filled FPS override field with detected value: {detected_fps_str}")
+                    elif current_fps_entry_val != detected_fps_str:
+                        print(
+                            f"FPS override field already contains '{current_fps_entry_val}', not overwriting with detected '{detected_fps_str}'.")
+                    # else: current value matches detected, no action needed
 
             if self.main_video_duration is None:
                 self.output_info.insert(tk.END, "WARNING: Could not determine main video duration from ffprobe.\n")
@@ -531,6 +662,7 @@ class VideoConverterGUI:
             self.output_info.insert(tk.END, f"FFPROBE ERROR: {error_msg}\n")
             self._clear_state()  # Reset on analysis failure
 
+    # ... (Keep remaining methods like browse_output_file, browse_ad_file, populate_track_table, etc., as they are) ...
     def browse_output_file(self) -> None:
         """Handles browsing for and selecting the output file path."""
         default_name = ""
@@ -639,13 +771,11 @@ class VideoConverterGUI:
                     if stream.get('width') and stream.get('height'):
                         details.append(f"{stream.get('width')}x{stream.get('height')}")
                     if stream.get('pix_fmt'): details.append(f"{stream.get('pix_fmt')}")
-                    # <<< CHANGED: Use original r_frame_rate string for display >>>
+                    # Use original r_frame_rate string for display
                     fps_str_display = stream.get('r_frame_rate', '?')  # Frames per second string
                     details.append(f"{fps_str_display} fps")
                     bitrate = stream.get('bit_rate')
                     if bitrate: details.append(f"{int(bitrate) // 1000} kb/s")
-
-                    # Duration is now fetched separately by get_media_duration
 
                 elif track_type == "audio":
                     details.append(f"{stream.get('codec_name', '?')}")
@@ -686,51 +816,37 @@ class VideoConverterGUI:
         column_id = self.track_tree.identify_column(event.x)  # Get ID of the clicked column (e.g., #4)
 
         if not item_iid or not column_id:
-            # item_iid will be an empty string if the click is not on a row
-            # No need to print here, just return
             return
 
-        # --- Use item_iid directly as the track_path_id ---
-        track_path_id: str = item_iid  # item_iid is the string ID we set
+        track_path_id: str = item_iid
 
-        # Get the internal name of the column (e.g., "title", "language")
         try:
             column_name_internal = self.track_tree.column(column_id, "id")
         except tk.TclError:
             print(f"Could not identify column name for column ID: {column_id}")
-            return  # Invalid column clicked
-
-        # Allow editing only for 'title' and 'language' columns
-        if column_name_internal not in {'title', 'language'}:
-            # print(f"Editing not allowed for column: {column_name_internal}") # No need to print
             return
 
-        # Get current values for the selected row to find the *current* value for the dialog
+        if column_name_internal not in {'title', 'language'}:
+            return
+
         try:
             item_values = list(self.track_tree.item(item_iid, "values"))
-            # Find the index corresponding to the internal column name
             column_index = self.track_tree['columns'].index(column_name_internal)
             current_value = item_values[column_index]
-            # Get the display name of the column (from heading)
             column_name_display = self.track_tree.heading(column_id)['text']
         except (ValueError, IndexError, KeyError, tk.TclError) as e:
             print(f"Error getting column data for editing: {e}")
             messagebox.showerror("Error", "Could not retrieve data for editing.")
             return
 
-        # Ask user for new value using a simple dialog
         new_value = simpledialog.askstring(f"Edit {column_name_display}",
                                            f"Enter new value for '{column_name_display}' (Track ID: {track_path_id}):",
-                                           initialvalue=str(current_value))  # Ensure initial value is string
+                                           initialvalue=str(current_value))
 
-        # Process the new value if user didn't cancel
-        if new_value is not None:  # User pressed OK (new_value can be empty string)
-            # Special validation for language code
+        if new_value is not None:
             if column_name_internal == 'language':
                 new_value = new_value.strip().lower()
-                # Basic check for 3-letter ISO 639-2 code
-                if not (len(new_value) == 3 and new_value.isalpha()) and new_value != "":  # Allow empty string
-                    # Allow clearing the language field
+                if not (len(new_value) == 3 and new_value.isalpha()) and new_value != "":
                     if new_value == "":
                         print(f"Clearing language for track {track_path_id}")
                     else:
@@ -738,44 +854,36 @@ class VideoConverterGUI:
                                              "Language code must be 3 letters (e.g., eng, rus, und) or empty.")
                         return
 
-            # --- Update the Treeview display ---
-            # Get potentially updated values list again before modifying
             current_item_values = list(self.track_tree.item(item_iid, "values"))
             try:
-                current_item_values[column_index] = new_value  # Update the specific value
-                self.track_tree.item(item_iid, values=tuple(current_item_values))  # Update requires tuple
+                current_item_values[column_index] = new_value
+                self.track_tree.item(item_iid, values=tuple(current_item_values))
             except (IndexError, tk.TclError) as e:
                 print(f"Error updating treeview item {item_iid}: {e}")
                 messagebox.showerror("Error", "Failed to update the display table.")
                 return
 
-            # --- Store the change in our internal track_data dictionary ---
-            # Ensure the entry for the track exists
             if track_path_id not in self.track_data:
                 self.track_data[track_path_id] = {}
 
-            # Update or remove the specific metadata field
-            if new_value:  # Store non-empty values
+            if new_value:
                 self.track_data[track_path_id][column_name_internal] = new_value
                 print(f"Metadata edit stored for {track_path_id}: {column_name_internal} = '{new_value}'")
                 self.output_info.insert(tk.END,
                                         f"Metadata updated for {track_path_id}: {column_name_internal} = '{new_value}'\n")
-            else:  # If new_value is empty, remove the key from edits
+            else:
                 if column_name_internal in self.track_data[track_path_id]:
                     del self.track_data[track_path_id][column_name_internal]
                     print(f"Metadata edit removed for {track_path_id}: {column_name_internal}")
                     self.output_info.insert(tk.END, f"Metadata cleared for {track_path_id}: {column_name_internal}\n")
-                # If the track entry in track_data becomes empty, remove it too
                 if not self.track_data[track_path_id]:
                     del self.track_data[track_path_id]
 
     def add_embed_timecode(self) -> None:
         """Adds an embed ad timecode and file to the list."""
-        # --- NO CHANGE NEEDED HERE - Still working with List[Dict[str, Any]] ---
         timecode = self.embed_timecodes_entry.get().strip()
         embed_file = self.embed_file_entry.get().strip()
 
-        # --- Input Validation ---
         if not embed_file:
             messagebox.showerror("File Error", "Please select a file for the embed ad.")
             return
@@ -796,24 +904,19 @@ class VideoConverterGUI:
                                  "Please select and analyze the main video file first to determine its duration.")
             return
 
-        # Check if timecode exceeds main video duration
         if time_sec > self.main_video_duration:
             messagebox.showwarning("Warning",
                                    f"Timecode {timecode} ({time_sec:.2f}s) exceeds main video duration ({self.main_video_duration:.2f}s). Ad will not be added.")
             return
         elif time_sec == self.main_video_duration:
-            # Ask for confirmation if inserting exactly at the end
             if not messagebox.askyesno("Confirmation",
                                        f"Timecode {timecode} matches the video end.\nThe ad will be appended after the main video.\nContinue?"):
                 return
 
-        # Get duration of the ad file itself
         try:
-            # Use a temporary FFMPEG instance just for getting duration
             ffmpeg_helper = ffmpeg.FFMPEG()
             embed_duration = ffmpeg_helper.get_media_duration(embed_file)
             if embed_duration is None or embed_duration <= 0.01:
-                # Handle cases where duration is invalid or the file might be an image
                 messagebox.showerror("Ad Duration Error",
                                      f"Could not determine a valid positive duration for the ad file:\n{embed_file}\nEnsure it's a valid video file.")
                 return
@@ -821,36 +924,29 @@ class VideoConverterGUI:
             messagebox.showerror("ffprobe Error (Ad)", f"Failed to get ad duration:\n{e}")
             return
 
-        # Check for duplicate timecodes (using the string representation)
         for ad in self.embed_ads:
             if ad['timecode'] == timecode:
                 messagebox.showwarning("Duplicate Timecode",
                                        f"Timecode {timecode} is already added for an embed ad.\nDouble-click the entry in the list to remove it.")
                 return
 
-        # Add the ad data as a dictionary
         ad_data = {'path': embed_file, 'timecode': timecode, 'duration': embed_duration}
         self.embed_ads.append(ad_data)
-        # Keep the list sorted by time in seconds for processing logic
         self.embed_ads.sort(key=lambda x: utils.timecode_to_seconds(x['timecode']))
         print(f"Embed ad added: {ad_data}")
 
-        # Update the listbox display and clear the entry field
         self._update_embed_listbox()
         self.embed_timecodes_entry.delete(0, tk.END)
 
     def delete_embed_timecode(self, event: tk.Event) -> None:
         """Deletes the selected embed ad entry from the list."""
-        # --- NO CHANGE NEEDED HERE - Still working with List[Dict[str, Any]] ---
         selected_indices = self.embed_timecodes_listbox.curselection()
-        if not selected_indices:  # No item selected
+        if not selected_indices:
             return
 
         index_to_delete = selected_indices[0]
         try:
-            # Get the corresponding ad data from our internal list
             ad_info = self.embed_ads[index_to_delete]
-            # Ask for confirmation
             confirm = messagebox.askyesno("Delete Embed Ad?",
                                           f"Remove the following embed ad insertion:\n"
                                           f"File: {os.path.basename(ad_info['path'])}\n"
@@ -859,29 +955,24 @@ class VideoConverterGUI:
             if confirm:
                 deleted_ad = self.embed_ads.pop(index_to_delete)
                 print(f"Embed ad removed: {deleted_ad}")
-                self._update_embed_listbox()  # Refresh the listbox display
+                self._update_embed_listbox()
         except IndexError:
-            # This might happen if the listbox and internal list get out of sync
             print(f"Error: Index out of range when deleting embed ad. Index: {index_to_delete}, List: {self.embed_ads}")
             messagebox.showerror("Error", "Could not delete selected entry (sync error). Listbox refreshed.")
-            self._update_embed_listbox()  # Refresh to potentially fix sync issue
+            self._update_embed_listbox()
 
     def _update_embed_listbox(self) -> None:
         """Updates the embed ad listbox based on the self.embed_ads list."""
-        # --- NO CHANGE NEEDED HERE - Still working with List[Dict[str, Any]] ---
-        self.embed_timecodes_listbox.delete(0, tk.END)  # Clear existing items
-        # Add each ad with its details
+        self.embed_timecodes_listbox.delete(0, tk.END)
         for ad in self.embed_ads:
             display_text = f"{ad['timecode']} ({os.path.basename(ad['path'])}, {ad['duration']:.2f}s)"
             self.embed_timecodes_listbox.insert(tk.END, display_text)
 
     def add_banner_timecode(self) -> None:
         """Adds a banner display timecode to the list."""
-        # --- NO CHANGE NEEDED HERE ---
         timecode = self.banner_timecodes_entry.get().strip()
-        banner_file = self.banner_file_entry.get().strip()  # Check if banner file is selected
+        banner_file = self.banner_file_entry.get().strip()
 
-        # --- Input Validation ---
         if not banner_file:
             messagebox.showerror("File Error", "Please select a banner file before adding timecodes.")
             return
@@ -898,79 +989,63 @@ class VideoConverterGUI:
             messagebox.showerror("Duration Error", "Please select and analyze the main video file first.")
             return
 
-        # Check if timecode exceeds *original* video duration (adjusted time is handled later)
         if time_sec >= self.main_video_duration:
             messagebox.showwarning("Warning",
                                    f"Banner timecode {timecode} ({time_sec:.2f}s) is at or after the *original* video end ({self.main_video_duration:.2f}s).\nEnsure this is intended, considering potential time shifts from embedded ads.")
-            # Allow adding it anyway, validation during command generation will handle filtering
 
-        # Check for duplicate timecodes
         if timecode in self.banner_timecodes:
             messagebox.showwarning("Duplicate Timecode",
                                    f"Timecode {timecode} is already added for the banner.\nDouble-click the entry to remove it.")
             return
 
-        # Add the timecode
         self.banner_timecodes.append(timecode)
-        # Keep the list sorted by time for display and processing
-        self.banner_timecodes.sort(key=lambda tc: utils.timecode_to_seconds(tc) or float('inf'))  # Sort numerically
+        self.banner_timecodes.sort(key=lambda tc: utils.timecode_to_seconds(tc) or float('inf'))
         print(f"Banner timecode added: {timecode}. Current list: {self.banner_timecodes}")
 
-        # Update the listbox display and clear the entry field
         self._update_banner_listbox()
         self.banner_timecodes_entry.delete(0, tk.END)
 
     def delete_banner_timecode(self, event: tk.Event) -> None:
         """Deletes the selected banner timecode from the list."""
-        # --- NO CHANGE NEEDED HERE ---
         selected_indices = self.banner_timecodes_listbox.curselection()
-        if not selected_indices:  # No item selected
+        if not selected_indices:
             return
 
         index = selected_indices[0]
         try:
-            # Get the timecode string directly from the listbox
             tc_to_remove = self.banner_timecodes_listbox.get(index)
-            # Ask for confirmation
             if messagebox.askyesno("Delete Timecode?", f"Remove banner timecode: {tc_to_remove}?"):
-                # Remove from the internal list if present
                 if tc_to_remove in self.banner_timecodes:
                     self.banner_timecodes.remove(tc_to_remove)
                     print(f"Banner timecode removed: {tc_to_remove}. Current list: {self.banner_timecodes}")
                 else:
-                    # Should not happen if lists are in sync
                     print(f"Warning: Timecode {tc_to_remove} not found in internal list during deletion.")
-                # Refresh the listbox display regardless
                 self._update_banner_listbox()
         except (IndexError, tk.TclError) as e:
-            # Handle potential errors getting value from listbox or list index issues
             print(f"Error deleting banner timecode: Index {index}, Error: {e}")
             messagebox.showerror("Error", "Could not delete selected entry.")
-            self._update_banner_listbox()  # Refresh listbox
+            self._update_banner_listbox()
 
     def _update_banner_listbox(self) -> None:
         """Updates the banner timecode listbox based on the self.banner_timecodes list."""
-        # --- NO CHANGE NEEDED HERE ---
-        self.banner_timecodes_listbox.delete(0, tk.END)  # Clear existing items
-        # Add each timecode from the sorted list
+        self.banner_timecodes_listbox.delete(0, tk.END)
         for tc in self.banner_timecodes:
             self.banner_timecodes_listbox.insert(tk.END, tc)
 
-    def detect_hwaccels(self) -> List[str]:
+    @staticmethod
+    def detect_hwaccels() -> List[str]:
         """Attempts to detect available ffmpeg hardware acceleration methods."""
-        # --- NO CHANGE NEEDED HERE ---
         try:
-            # Run ffmpeg -hwaccels to list available methods
             process = subprocess.Popen(["ffmpeg", "-hwaccels", "-hide_banner"],
                                        stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE,
                                        text=True, encoding='utf-8', errors='replace')
-            output, _ = process.communicate(timeout=5)  # Add timeout
-            # Parse the output, skipping header lines
+            output, _ = process.communicate(timeout=5)
             hwaccels = [line.strip() for line in output.splitlines()
                         if line.strip() != "" and "Hardware acceleration methods" not in line]
+            hwaccels.extend(["auto", "none"])
             print(f"Detected HW Accels: {hwaccels}")
-            return hwaccels if hwaccels else ["none available"]
+            return hwaccels
         except FileNotFoundError:
             print("Error detecting HW Accels: ffmpeg not found.")
             return ["ffmpeg not found"]
@@ -983,36 +1058,28 @@ class VideoConverterGUI:
 
     def _prepare_and_generate_commands(self) -> Optional[Tuple[List[str], str, List[str]]]:
         """Gathers all inputs, validates them, creates an FFMPEG instance, and generates commands."""
-        # 1. Cleanup previous state and log
-        self.cleanup_temp_files()  # Clear any old temp files first
+        self.cleanup_temp_files()
         self.output_info.delete('1.0', tk.END)
         self.output_info.insert('1.0', "Preparing and generating ffmpeg commands...\n")
-        self.master.update_idletasks()  # Show message immediately
+        self.master.update_idletasks()
 
-        # 2. Gather inputs from GUI fields
         input_file = self.input_file_entry.get().strip()
         output_file = self.output_file_entry.get().strip()
-
-        # Transcoding parameters
         video_codec = self.video_codec_entry.get().strip() or None
         video_preset = self.video_preset_entry.get().strip() or None
         video_cq = self.video_cq_entry.get().strip() or None
         video_bitrate = self.video_bitrate_entry.get().strip() or None
         audio_codec = self.audio_codec_entry.get().strip() or None
         audio_bitrate = self.audio_bitrate_entry.get().strip() or None
-        video_fps = self.video_fps_entry.get().strip() or None  # <<< User override string
+        video_fps = self.video_fps_entry.get().strip() or None
         hwaccel = self.hwaccel_combo.get().strip() or None
         additional_encoding = self.additional_encoding_entry.get().strip() or None
-        # Manual override parameter string
-        encoding_params_str = self.encoding_entry.get().strip()  # This is passed separately
-
-        # Ad/Banner parameters
+        encoding_params_str = self.encoding_entry.get().strip()
         banner_file = self.banner_file_entry.get().strip() or None
         moving_file = self.moving_file_entry.get().strip() or None
         banner_track_pix_fmt = self.banner_track_pix_fmt_entry.get().strip() or None
         banner_gap_color = self.banner_gap_color_entry.get().strip() or None
 
-        # Ad/Banner numerical parameters with error handling
         try:
             moving_speed = float(
                 self.moving_speed_entry.get().strip()) if self.moving_speed_entry.get().strip() else None
@@ -1025,21 +1092,17 @@ class VideoConverterGUI:
             self.output_info.insert(tk.END, f"ERROR: Invalid numeric input: {e}\n")
             return None
 
-        # 3. Basic Validation
         error_messages = []
         if not input_file: error_messages.append("- Input file not selected.")
         if not output_file: error_messages.append("- Output file not selected.")
         if input_file and not os.path.exists(input_file): error_messages.append(f"- Input file not found: {input_file}")
-        # Use the stored duration/params from analysis
         if self.main_video_duration is None or self.main_video_duration <= 0:
             error_messages.append(
                 "- Could not determine a valid duration for the main video. Please re-select the input file.")
-        # <<< CHECK DATACLASS ATTRIBUTES including fps >>>
         if not self.main_video_params or self.main_video_params.width is None or self.main_video_params.fps is None:
             error_messages.append(
                 "- Could not get essential parameters (width/height/fps) from the main video. Please re-select the input file.")
 
-        # Warnings for missing files (actual handling is done in ffmpeg_utils)
         if banner_file and not os.path.exists(banner_file):
             self.output_info.insert(tk.END, f"WARNING: Banner file '{banner_file}' not found, it will be ignored.\n")
         if moving_file and not os.path.exists(moving_file):
@@ -1055,23 +1118,14 @@ class VideoConverterGUI:
             self.output_info.insert(tk.END, f"VALIDATION ERROR:\n{full_error_msg}\n")
             return None
 
-        # 4. Create FFMPEG instance with gathered parameters
         try:
-            # <<< Pass the string 'video_fps' override from the GUI >>>
             self.ffmpeg_instance = ffmpeg.FFMPEG(
-                video_codec=video_codec,
-                video_preset=video_preset,
-                video_cq=video_cq,
-                video_bitrate=video_bitrate,
-                audio_codec=audio_codec,
-                audio_bitrate=audio_bitrate,
-                video_fps=video_fps,  # Pass the user override string here
-                moving_speed=moving_speed,
+                video_codec=video_codec, video_preset=video_preset, video_cq=video_cq,
+                video_bitrate=video_bitrate, audio_codec=audio_codec, audio_bitrate=audio_bitrate,
+                video_fps=video_fps, moving_speed=moving_speed,
                 moving_logo_relative_height=moving_logo_relative_height,
-                moving_logo_alpha=moving_logo_alpha,
-                banner_track_pix_fmt=banner_track_pix_fmt,
-                banner_gap_color=banner_gap_color,
-                hwaccel=hwaccel,
+                moving_logo_alpha=moving_logo_alpha, banner_track_pix_fmt=banner_track_pix_fmt,
+                banner_gap_color=banner_gap_color, hwaccel=hwaccel,
                 additional_encoding=additional_encoding
             )
         except Exception as e:
@@ -1079,59 +1133,49 @@ class VideoConverterGUI:
             self.output_info.insert(tk.END, f"FFMPEG INIT ERROR:\nFailed to initialize settings: {e}\n")
             return None
 
-        # 5. Generate Commands
         print("Calling generate_ffmpeg_commands with parameters:")
         print(f"  input_file: {input_file}")
         print(f"  output_file: {output_file}")
         print(f"  encoding_params_str (Manual Override): '{encoding_params_str}'")
-        print(f"  main_video_params (has float fps): {self.main_video_params}")  # Log the dataclass
+        print(f"  main_video_params (has float fps): {self.main_video_params}")
         print(f"  main_video_duration: {self.main_video_duration}")
-        print(f"  track_data: {self.track_data}")  # Pass Dict[Dict]
-        print(f"  embed_ads: {self.embed_ads}")  # Pass List[Dict]
+        print(f"  track_data: {self.track_data}")
+        print(f"  embed_ads: {self.embed_ads}")
         print(f"  banner_file: {banner_file}")
         print(f"  banner_timecodes: {self.banner_timecodes}")
         print(f"  moving_file: {moving_file}")
 
         try:
-            # Pass the original dictionary formats for track_data and embed_ads
-            # ffmpeg_utils.generate_ffmpeg_commands expects these formats from GUI
-            # <<< The ffmpeg instance handles the float fps internally >>>
             result = self.ffmpeg_instance.generate_ffmpeg_commands(
-                input_file=input_file,
-                output_file=output_file,
-                encoding_params_str=encoding_params_str,
-                track_data=self.track_data,
-                embed_ads=self.embed_ads,
-                banner_file=banner_file,
-                banner_timecodes=self.banner_timecodes,
-                moving_file=moving_file
+                input_file=input_file, output_file=output_file,
+                encoding_params_str=encoding_params_str, track_data=self.track_data,
+                embed_ads=self.embed_ads, banner_file=banner_file,
+                banner_timecodes=self.banner_timecodes, moving_file=moving_file
             )
-            # Store the list of temp files that *might* be created
             self.temp_files_to_clean = result[2] if result and len(result) > 2 else []
             self.output_info.insert(tk.END, "Commands generated successfully.\n")
             print(f"Potential temporary files: {self.temp_files_to_clean}")
-            return result  # Tuple: (preproc_cmds, main_cmd, temp_files)
+            return result
 
         except (CommandGenerationError, FfmpegError) as e:
             error_msg = f"Command Generation Error:\n{e}"
             messagebox.showerror("Generation Error", error_msg)
             self.output_info.insert(tk.END, f"COMMAND GENERATION ERROR:\n{error_msg}\n")
-            self.cleanup_temp_files()  # Clean up any partial temp files
+            self.cleanup_temp_files()
             return None
         except Exception as e:
-            # Catch unexpected errors during command generation
             error_msg = f"An unexpected error occurred during command generation:\n{type(e).__name__}: {e}"
             messagebox.showerror("Unexpected Error", error_msg)
             self.output_info.insert(tk.END, f"UNEXPECTED GENERATION ERROR:\n{error_msg}\n")
             import traceback
-            traceback.print_exc()  # Print stack trace to console
+            traceback.print_exc()
             self.cleanup_temp_files()
             return None
 
     def show_ffmpeg_commands(self) -> None:
         """Generates and displays the ffmpeg commands in the output area."""
         result = self._prepare_and_generate_commands()
-        self.output_info.delete('1.0', tk.END)  # Clear previous output
+        self.output_info.delete('1.0', tk.END)
 
         if result:
             preproc_cmds, main_cmd, temp_files_generated = result
@@ -1139,7 +1183,6 @@ class VideoConverterGUI:
 
             output_text += "--- Potential Temporary Files ---\n"
             if temp_files_generated:
-                # Display only basenames for brevity
                 output_text += "\n".join([f"  - {os.path.basename(f)}" for f in temp_files_generated])
             else:
                 output_text += "  (None)"
@@ -1148,7 +1191,6 @@ class VideoConverterGUI:
             if preproc_cmds:
                 output_text += f"--- Preprocessing Commands ({len(preproc_cmds)}) ---\n"
                 for i, cmd in enumerate(preproc_cmds):
-                    # Display command, add separator
                     output_text += f"[{i + 1}]: {cmd}\n{'-' * 60}\n"
                 output_text += "\n"
             else:
@@ -1158,29 +1200,24 @@ class VideoConverterGUI:
                 output_text += "--- Main Conversion Command ---\n"
                 output_text += main_cmd + "\n"
             else:
-                # This case should ideally be caught earlier, but handle defensively
                 output_text += "--- ERROR: Main conversion command could not be generated ---"
 
             self.output_info.insert('1.0', output_text)
-            self.output_info.yview_moveto(0.0)  # Scroll to top
+            self.output_info.yview_moveto(0.0)
         else:
-            # Error occurred during preparation/generation
             self.output_info.insert('1.0',
                                     "Failed to generate commands. Check settings and error messages above/in console.")
 
     def start_conversion(self) -> None:
         """Initiates the ffmpeg conversion process after confirmation."""
-        # --- NO CHANGE NEEDED HERE ---
-        # 1. Prepare and Generate Commands
         result = self._prepare_and_generate_commands()
 
         if not result:
             messagebox.showerror("Cancelled", "Failed to prepare ffmpeg commands. Conversion cancelled.")
             return
 
-        preproc_cmds, main_cmd, _ = result  # We already stored temp files list
+        preproc_cmds, main_cmd, _ = result
 
-        # 2. Confirmation Dialog
         num_preproc = len(preproc_cmds) if preproc_cmds else 0
         confirm_message_parts = ["The following steps will be executed:"]
         steps = []
@@ -1189,7 +1226,6 @@ class VideoConverterGUI:
         if main_cmd:
             steps.append("Perform main conversion with merging and overlays.")
         else:
-            # This shouldn't happen if _prepare_and_generate_commands worked, but check anyway
             messagebox.showerror("Error", "No main conversion command generated. Cannot proceed.")
             return
 
@@ -1208,18 +1244,16 @@ class VideoConverterGUI:
         if not messagebox.askyesno("Confirm Conversion", confirm_message):
             print("Conversion cancelled by user.")
             self.output_info.insert(tk.END, "\nConversion cancelled by user.\n")
-            self.cleanup_temp_files()  # Clean up files generated during preparation
+            self.cleanup_temp_files()
             return
 
-        # 3. Execute Commands
-        self.output_info.delete('1.0', tk.END)  # Clear previous log/commands
+        self.output_info.delete('1.0', tk.END)
         self.output_info.insert('1.0', "Starting conversion process...\n\n")
-        self.master.update()  # Show message
+        self.master.update()
 
         try:
             start_time_total = time.time()
 
-            # Execute Preprocessing Commands
             if preproc_cmds:
                 self.output_info.insert(tk.END, f"--- Stage 1: Preprocessing ({len(preproc_cmds)} commands) ---\n")
                 self.master.update()
@@ -1227,10 +1261,9 @@ class VideoConverterGUI:
                 for i, cmd in enumerate(preproc_cmds):
                     step_name = f"Preprocessing {i + 1}/{len(preproc_cmds)}"
                     self.output_info.insert(tk.END, f"\nRunning: {step_name}...\n")
-                    self.output_info.see(tk.END)  # Scroll to show current step
+                    self.output_info.see(tk.END)
                     self.master.update()
                     start_time_step = time.time()
-                    # Use the static method from FFMPEG class to run the command
                     ffmpeg.FFMPEG.run_ffmpeg_command(cmd, step_name)
                     end_time_step = time.time()
                     self.output_info.insert(tk.END,
@@ -1241,7 +1274,6 @@ class VideoConverterGUI:
                 self.output_info.insert(tk.END,
                                         f"\n--- Preprocessing finished (Total time: {end_time_preproc - start_time_preproc:.2f}s) ---\n")
 
-            # Execute Main Command
             if main_cmd:
                 step_name = "Main Conversion"
                 self.output_info.insert(tk.END, f"\n--- Stage 2: {step_name} ---\n")
@@ -1263,28 +1295,25 @@ class VideoConverterGUI:
             messagebox.showinfo("Success", "Conversion completed successfully!")
 
         except (ConversionError, FfmpegError) as e:
-            # Handle errors reported by run_ffmpeg_command or FfmpegError during setup
             error_msg = f"\n--- CONVERSION FAILED ---\n{e}\n--- PROCESS HALTED ---"
             print(error_msg)
             self.output_info.insert(tk.END, error_msg + "\n")
             self.output_info.see(tk.END)
             messagebox.showerror("Conversion Failed", f"An error occurred during conversion:\n\n{e}")
         except Exception as e:
-            # Catch any other unexpected errors during the execution loop
             error_msg = f"\n--- UNEXPECTED ERROR ---\n{type(e).__name__}: {e}\n--- PROCESS HALTED ---"
             print(error_msg)
             import traceback
-            traceback.print_exc()  # Print stack trace to console
+            traceback.print_exc()
             self.output_info.insert(tk.END, error_msg + "\n")
             self.output_info.see(tk.END)
             messagebox.showerror("Critical Error",
                                  f"An unexpected error occurred:\n{type(e).__name__}: {e}\n\nCheck console for details.")
 
         finally:
-            # 4. Final Cleanup (always run)
             self.output_info.insert(tk.END, "\nRunning final cleanup of temporary files...\n")
             self.output_info.see(tk.END)
             self.master.update()
-            self.cleanup_temp_files()  # Call cleanup method
+            self.cleanup_temp_files()
             self.output_info.insert(tk.END, "Cleanup finished.\n")
             self.output_info.see(tk.END)
