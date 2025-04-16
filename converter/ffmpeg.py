@@ -953,112 +953,147 @@ class FFMPEG:
 
         return preprocessing_cmds, banner_concat_list_path, temp_files, concatenated_banner_path
 
-    def _build_moving_logo_filter(self, current_video_input_label: str, moving_input_stream_label: str,
-                                  target_params: TargetParams, final_duration_estimate: float) -> Tuple[
-        List[str], Optional[str]]:
+    def _build_moving_logo_filter(self,
+                                  current_video_input_label: str, # e.g., [v_banner_out_1] or [0:v]
+                                  moving_input_stream_label: str, # e.g., [2:v]
+                                  transparent_canvas_label: str,  # e.g., [transparent_canvas]
+                                  target_params: TargetParams,
+                                  final_duration_estimate: float
+                                 ) -> Tuple[List[str], Optional[str]]:
         """
-        Builds the filtergraph string parts for the moving logo overlay.
-        NOTE: This version includes the structure for the motion blur filter logic,
-              even though the actual implementation is pending a separate step.
+        Builds filtergraph parts for:
+        1. Preparing the logo (scale, alpha).
+        2. Overlaying the animated logo onto a transparent canvas.
+        3. Optionally applying motion blur (tmix) to the animated logo.
+        4. Overlaying the result onto the main video stream.
+        Returns the list of filter parts and the label of the final output stream.
         """
         filter_parts = []
+        moving_input_index = moving_input_stream_label.strip('[]').split(':')[0] # For unique labels
 
-        print(f"  Setting up filter for moving ad (Input: {moving_input_stream_label})...")
-        # Extract input index for unique labeling
-        moving_input_index = moving_input_stream_label.strip('[]').split(':')[0]
         # Define intermediate stream labels
         scaled_moving_stream = f"[moving_scaled_{moving_input_index}]"
-        transparent_moving_stream = f"[moving_alpha_{moving_input_index}]"
-        # Define the output label for the entire moving logo filter stage
-        final_moving_overlay_output_label = f"[v_moving_out_{moving_input_index}]"
+        prepared_logo_stream = f"[logo_prepared_{moving_input_index}]" # Logo with alpha
+        logo_anim_on_canvas_stream = f"[logo_anim_canvas_{moving_input_index}]" # Logo animated on transparent canvas
+        logo_blurred_stream = f"[logo_blurred_{moving_input_index}]" # Changed from tblend to tmix conceptually
+        final_moving_overlay_output_label = f"[v_moving_out_{moving_input_index}]" # Final output after overlaying on main video
 
-        # --- Scaling ---
-        main_h = target_params.height if target_params.height else 720  # Use target height or fallback
+        print(f"  Setting up filter for moving ad (Input: {moving_input_stream_label}, Canvas: {transparent_canvas_label})...")
+
+        # --- 1. Prepare Logo (Scale + Alpha) ---
+        main_h = target_params.height if target_params.height else 720
         if not main_h:
             raise CommandGenerationError("Cannot determine main video height for logo scaling.")
-        # Calculate target logo height based on relative setting
         logo_target_h = max(1, int(main_h * self.moving_logo_relative_height))
-        sar_value = target_params.sar.replace(':', '/')  # Format for setsar
-        # Scale logo: maintain aspect ratio (-1 width), set target height, use good scaling algorithm
+        sar_value = target_params.sar.replace(':', '/')
         moving_scale_filter = f"scale=-1:{logo_target_h}:flags=bicubic"
-        # Chain scaling and SAR setting
         filter_parts.append(
             f"{moving_input_stream_label}{moving_scale_filter},setsar=sar={sar_value}{scaled_moving_stream}")
-
-        # --- Transparency ---
-        clamped_alpha = max(0.0, min(1.0, self.moving_logo_alpha))  # Ensure alpha is between 0 and 1
-        # Ensure input is RGBA for colorchannelmixer, then apply alpha
+        clamped_alpha = max(0.0, min(1.0, self.moving_logo_alpha))
         alpha_filter = f"format=pix_fmts=rgba,colorchannelmixer=aa={clamped_alpha:.3f}"
-        filter_parts.append(f"{scaled_moving_stream}{alpha_filter}{transparent_moving_stream}")
+        filter_parts.append(f"{scaled_moving_stream}{alpha_filter}{prepared_logo_stream}")
+        print(f"    Logo prepared: {prepared_logo_stream}")
 
-        # --- Movement (Overlay) ---
-        # Calculate cycle duration based on total video duration and speed factor
-        t_total = max(0.1, final_duration_estimate)  # Avoid division by zero
-        # Ensure moving speed is valid
+        # --- 2. Animate Logo on Transparent Canvas ---
+        t_total = max(0.1, final_duration_estimate)
         if not isinstance(self.moving_speed, (int, float)) or self.moving_speed <= 0:
-            moving_speed = 1.0  # Default speed if invalid
-            print("    Warning: Invalid moving speed, using default 1.0.")
+            moving_speed = 1.0
         else:
             moving_speed = self.moving_speed
+        cycle_t = t_total / moving_speed
+        x_expr, y_expr = "'0'", "'0'" # Default static
 
-        cycle_t = t_total / moving_speed  # Time for one full cycle (rect path)
-        # Default to static position if cycle time is too short
-        x_expr, y_expr = "'0'", "'0'"  # Top-left corner default
+        if cycle_t > 0.5:
+            canvas_w = target_params.width if target_params.width else 1280
+            canvas_h = target_params.height if target_params.height else 720
 
-        # Define rectangular path animation only if cycle duration is meaningful
-        if cycle_t > 0.5:  # Arbitrary threshold for meaningful animation
-            # Define time points within one cycle (0, T/4, T/2, 3T/4, T)
             t1, t2, t3 = cycle_t / 4, cycle_t / 2, 3 * cycle_t / 4
-            # Duration of each segment (T/4)
-            seg_dur = max(cycle_t / 4, 1e-6)  # Avoid division by zero
-            # Max x and y coordinates (main dimensions minus overlay dimensions)
-            mx, my = f"(main_w-overlay_w)", f"(main_h-overlay_h)"
-            # Time variable within the current cycle: mod(t, cycle_t)
+            seg_dur = max(cycle_t / 4, 1e-6)
+            mx, my = f"(W-overlay_w)", f"(H-overlay_h)" # W/H refer to canvas (1st input)
             tv = f"mod(t,{cycle_t:.6f})"
 
-            # X-coordinate expressions for each segment
-            x1 = f"{mx}*({tv}/{seg_dur:.6f})"  # 0 -> t1: Move right
-            x2 = f"{mx}"  # t1 -> t2: Stay right
-            x3 = f"{mx}*(1-(({tv}-{t2:.6f})/{seg_dur:.6f}))"  # t2 -> t3: Move left
-            x4 = "0"  # t3 -> cycle_t: Stay left
+            x1 = f"{mx}*({tv}/{seg_dur:.6f})"
+            x2 = f"{mx}"
+            x3 = f"{mx}*(1-(({tv}-{t2:.6f})/{seg_dur:.6f}))"
+            x4 = "0"
+            y1 = "0"
+            y2 = f"{my}*(({tv}-{t1:.6f})/{seg_dur:.6f})"
+            y3 = f"{my}"
+            y4 = f"{my}*(1-(({tv}-{t3:.6f})/{seg_dur:.6f}))"
 
-            # Y-coordinate expressions for each segment
-            y1 = "0"  # 0 -> t1: Stay top
-            y2 = f"{my}*(({tv}-{t1:.6f})/{seg_dur:.6f})"  # t1 -> t2: Move down
-            y3 = f"{my}"  # t2 -> t3: Stay bottom
-            y4 = f"{my}*(1-(({tv}-{t3:.6f})/{seg_dur:.6f}))"  # t3 -> cycle_t: Move up
-
-            # Combine expressions using nested if conditions
             x_expr = f"'if(lt({tv},{t1:.6f}),{x1},if(lt({tv},{t2:.6f}),{x2},if(lt({tv},{t3:.6f}),{x3},{x4})))'"
             y_expr = f"'if(lt({tv},{t1:.6f}),{y1},if(lt({tv},{t2:.6f}),{y2},if(lt({tv},{t3:.6f}),{y3},{y4})))'"
-            print(f"    Moving ad animation: Rectangular path ({cycle_t:.2f}s cycle).")
+            print(f"    Moving ad animation calculated: Rectangular path ({cycle_t:.2f}s cycle).")
         else:
-            print(
-                f"    Warning: Animation cycle duration ({cycle_t:.3f}s) is too short, logo will be static at top-left.")
+             print(f"    Warning: Animation cycle duration ({cycle_t:.3f}s) is too short, logo will be static at top-left.")
 
-        # --- [PLACEHOLDER for Motion Blur Logic] ---
-        # Future implementation:
-        # 1. Create an intermediate video with the logo moving on transparent bg using x_expr, y_expr.
-        # 2. Apply tblend or minterpolate to this intermediate video. Calculations will use target_params.fps (float).
-        #    - Need to calculate 'frames' for tblend based on movement distance/fps.
-        #    - Example: blur_frames = max(1, round(target_params.fps / ( (target_params.width / cycle_t) * safety_factor )))
-        # 3. The input to the final overlay below would be the *blurred* intermediate stream.
-        # For now, we proceed without blur, using the transparent logo stream directly.
+        overlay_on_canvas_filter = (f"{transparent_canvas_label}{prepared_logo_stream}"
+                                    f"overlay=x={x_expr}:y={y_expr}:shortest=0"
+                                    f"{logo_anim_on_canvas_stream}")
+        filter_parts.append(overlay_on_canvas_filter)
+        print(f"    Animated logo on canvas: {logo_anim_on_canvas_stream}")
 
-        # --- Final Overlay ---
-        # Build the overlay filter using the non-blurred, transparent logo stream for now.
-        # Inputs: [current video stream], [transparent logo stream]
-        # Outputs: [final_moving_overlay_output_label]
-        # shortest=0: Ensure overlay lasts the duration of the main video stream
-        overlay_filter = (f"{current_video_input_label}{transparent_moving_stream}"
-                          f"overlay=x={x_expr}:y={y_expr}:shortest=0"
-                          f"{final_moving_overlay_output_label}")
-        filter_parts.append(overlay_filter)
+        # --- 3. Apply Motion Blur (Conditional) ---
+        stream_for_final_overlay = logo_anim_on_canvas_stream # Default to non-blurred stream
 
-        # The output label of this stage becomes the input for the next
-        next_video_output_label = final_moving_overlay_output_label
-        print(f"    Overlay filter for moving ad added. Output: {next_video_output_label}")
-        return filter_parts, next_video_output_label
+        if config.MOVING_LOGO_MOTION_BLUR:
+            print("    Motion blur enabled. Calculating parameters...")
+            final_blur_frames = 1
+            try:
+                if target_params.fps is None or target_params.fps <= 0:
+                    print("      Warning: Cannot apply motion blur, target FPS is invalid.")
+                elif target_params.width is None or target_params.height is None:
+                     print("      Warning: Cannot apply motion blur, target dimensions are unknown.")
+                elif cycle_t <= 0.5:
+                     print("      Skipping motion blur for static logo.")
+                     final_blur_frames = 1
+                else:
+                    fps = target_params.fps
+                    width = target_params.width
+                    height = target_params.height
+                    max_travel_distance = float(max(width, height))
+                    time_to_cross_half_screen = cycle_t / 2.0
+                    pixels_per_second = 0.0
+                    if time_to_cross_half_screen > 1e-6:
+                        pixels_per_second = max_travel_distance / time_to_cross_half_screen
+                    print(f"      Estimated speed: {pixels_per_second:.2f} pixels/sec (approx)")
+                    base_blur_frames = 1.0
+                    if pixels_per_second > 1e-6:
+                         base_blur_frames = fps / pixels_per_second
+                    blur_scaling_factor = 5.0
+                    adjusted_blur_frames = (base_blur_frames
+                                            * config.MOVING_LOGO_BLUR_INTENSITY
+                                            * blur_scaling_factor)
+                    final_blur_frames = max(1, round(adjusted_blur_frames))
+                    print(f"      Calculated tmix frames: {final_blur_frames} (Intensity: {config.MOVING_LOGO_BLUR_INTENSITY})") # <<< UPDATED Log message
+
+                if final_blur_frames > 1:
+                    # <<< CHANGED: Use tmix instead of tblend >>>
+                    tmix_filter = (f"{logo_anim_on_canvas_stream}"
+                                     f"tmix=frames={final_blur_frames}" # Removed weights (default is average)
+                                     f"{logo_blurred_stream}")
+                    # <<< END OF CHANGE >>>
+                    filter_parts.append(tmix_filter)
+                    stream_for_final_overlay = logo_blurred_stream
+                    print(f"    Applied tmix filter. Output: {stream_for_final_overlay}") # <<< UPDATED Log message
+                else:
+                     print("    Calculated blur frames <= 1, skipping tmix filter.") # <<< UPDATED Log message
+
+            except Exception as e:
+                 print(f"      Warning: Error calculating motion blur frames: {e}. Skipping blur.")
+
+        else:
+             print("    Motion blur disabled in config.")
+
+
+        # --- 4. Final Overlay on Main Video ---
+        final_overlay_filter = (f"{current_video_input_label}{stream_for_final_overlay}"
+                                f"overlay=x=0:y=0:shortest=0"
+                                f"{final_moving_overlay_output_label}")
+        filter_parts.append(final_overlay_filter)
+
+        print(f"    Final logo overlay added. Output: {final_moving_overlay_output_label}")
+        return filter_parts, final_moving_overlay_output_label
 
     def _build_filter_complex(self,
                               base_video_specifier: str, base_audio_specifier: Optional[str],
@@ -1079,44 +1114,34 @@ class FFMPEG:
         final_audio_map_label = base_audio_specifier
 
         # --- Banner Overlay Filter ---
-        # Check if we have a valid banner track, timecodes, and duration
         if concatenated_banner_track_idx is not None and banner_timecodes and original_banner_duration is not None:
             try:
                 print(
                     f"  Setting up overlay filter for banner track (Input: [{concatenated_banner_track_idx}:v], using 'between')...")
-                banner_track_input_label = f"[{concatenated_banner_track_idx}:v]"  # Input label for banner stream
-                # Define output label for this filter stage
+                banner_track_input_label = f"[{concatenated_banner_track_idx}:v]"
                 overlay_output_label_banner = f"[v_banner_out_{concatenated_banner_track_idx}]"
 
-                # Build the 'enable' expression using 'between' for each adjusted time interval
                 enable_parts = []
-                # Recalculate adjusted times here to build the 'enable' condition
                 valid_banner_timecodes_sec = sorted(
                     filter(None, [utils.timecode_to_seconds(tc) for tc in banner_timecodes]))
                 for banner_original_sec in valid_banner_timecodes_sec:
                     adjusted_start_time = self._calculate_adjusted_times(banner_original_sec, is_concat_mode,
                                                                          sorted_embed_ads)
                     end_time = min(adjusted_start_time + original_banner_duration, final_duration_estimate)
-                    # Add 'between' clause if interval is valid
                     if end_time > adjusted_start_time + 0.001 and adjusted_start_time < final_duration_estimate:
                         enable_parts.append(f"between(t,{adjusted_start_time:.3f},{end_time:.3f})")
 
                 if enable_parts:
-                    # Join 'between' clauses with '+' (logical OR for enable)
                     enable_expression = "+".join(enable_parts)
-                    # Define overlay position (bottom-left)
                     overlay_y_pos, overlay_x_pos = "main_h-overlay_h", "0"
-                    # Build the overlay filter string
                     banner_overlay_filter = (
-                        f"{last_filter_video_label}{banner_track_input_label}"  # Inputs: current video, banner track
-                        f"overlay=x={overlay_x_pos}:y={overlay_y_pos}:enable='{enable_expression}':shortest=0"  # Overlay params
-                        f"{overlay_output_label_banner}"  # Output label
+                        f"{last_filter_video_label}{banner_track_input_label}"
+                        f"overlay=x={overlay_x_pos}:y={overlay_y_pos}:enable='{enable_expression}':shortest=0"
+                        f"{overlay_output_label_banner}"
                     )
                     all_filter_parts.append(banner_overlay_filter)
-                    # Update the label for the *next* filter stage
-                    last_filter_video_label = overlay_output_label_banner
-                    # Update the final label to be mapped for video output
-                    final_video_output_map_label = last_filter_video_label.strip('[]')
+                    last_filter_video_label = overlay_output_label_banner  # Update input for next stage
+                    final_video_output_map_label = last_filter_video_label.strip('[]')  # Update final map target
                     print(
                         f"    Overlay filter for banner track (using 'between') added. Output: {last_filter_video_label}")
                 else:
@@ -1126,41 +1151,52 @@ class FFMPEG:
                 print(f"Warning: Error building banner overlay filter: {e}. Skipping banner.")
 
         # --- Moving Logo Filter ---
-        # Check if we have a valid moving logo file and input index
         if moving_file and moving_input_idx is not None:
-            try:
-                moving_input_stream_label = f"[{moving_input_idx}:v]"  # Input label for logo stream
-                # Call helper to build logo filter parts, using the *output* of the previous stage as input
-                # <<< NOTE: This call uses the float target_params.fps internally for potential future blur calc >>>
-                logo_filters, last_video_label_after_logo = self._build_moving_logo_filter(
-                    last_filter_video_label,  # Input is the output of banner overlay (or base video)
-                    moving_input_stream_label,  # Input is the logo file stream
-                    target_params,
-                    final_duration_estimate)
+            # --- <<< CHANGED: Generate transparent canvas FIRST >>> ---
+            transparent_canvas_label = "[transparent_canvas]"
+            if not target_params.width or not target_params.height or not target_params.fps:
+                print(
+                    "Warning: Cannot generate transparent canvas for logo - missing target dimensions or FPS. Skipping logo.")
+            else:
+                try:
+                    canvas_width = target_params.width
+                    canvas_height = target_params.height
+                    canvas_fps = str(target_params.fps)  # Convert float fps to string for filter
+                    canvas_duration = f"{final_duration_estimate:.6f}"
+                    # Create transparent canvas with correct dimensions, fps, duration, and RGBA format
+                    canvas_filter = (
+                        f"color=c=black@0.0:s={canvas_width}x{canvas_height}:r={canvas_fps}:d={canvas_duration},"
+                        f"format=rgba{transparent_canvas_label}")
+                    all_filter_parts.append(canvas_filter)
+                    print(f"    Generated transparent canvas for logo: {transparent_canvas_label}")
 
-                # If logo filters were successfully generated
-                if last_video_label_after_logo:
-                    all_filter_parts.extend(logo_filters)
-                    # Update the label for the next stage (if any)
-                    last_filter_video_label = last_video_label_after_logo
-                    # Update the final label to be mapped for video output
-                    final_video_output_map_label = last_filter_video_label.strip('[]')
-            except Exception as e:
-                print(f"Warning: Error building moving logo filter: {e}. Skipping logo.")
+                    # --- <<< CHANGED: Call _build_moving_logo_filter with canvas label >>> ---
+                    moving_input_stream_label = f"[{moving_input_idx}:v]"
+                    logo_filters, last_video_label_after_logo = self._build_moving_logo_filter(
+                        current_video_input_label=last_filter_video_label,
+                        # Input is the output of banner overlay (or base video)
+                        moving_input_stream_label=moving_input_stream_label,
+                        transparent_canvas_label=transparent_canvas_label,  # Pass the canvas label
+                        target_params=target_params,
+                        final_duration_estimate=final_duration_estimate)
+
+                    if last_video_label_after_logo:
+                        all_filter_parts.extend(logo_filters)
+                        last_filter_video_label = last_video_label_after_logo  # Update input for next stage
+                        final_video_output_map_label = last_filter_video_label.strip('[]')  # Update final map target
+                except Exception as e:
+                    print(f"Warning: Error building moving logo filter: {e}. Skipping logo.")
+            # --- <<< END OF CHANGES for Moving Logo >>> ---
 
         # --- Final Assembly ---
         if not all_filter_parts:
             print("--- No filters applied ---")
-            # Return None for filter string, use base specifiers for mapping
             return None, base_video_specifier, base_audio_specifier
 
-        # Join all filter parts with semicolons
         filter_complex_str = ";".join(all_filter_parts)
         print(
             f"--- Final filter_complex generated ({len(all_filter_parts)} stages). Video output: [{final_video_output_map_label}] ---")
-        # DEBUG: Print the generated filter string
-        # print(f"DEBUG filter_complex:\n{filter_complex_str}\n")
-        # Return the full filter string and the final output labels for video and audio
+        # print(f"DEBUG filter_complex:\n{filter_complex_str}\n") # Uncomment for debugging
         return filter_complex_str, final_video_output_map_label, final_audio_map_label
 
     def _define_main_command_inputs(self,
