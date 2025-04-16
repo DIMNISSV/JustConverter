@@ -29,3 +29,6 @@ HWACCEL: str = "auto"  # Default hardware acceleration method (e.g., "auto", "cu
 
 # --- Additional Parameters ---
 ADDITIONAL_ENCODING: str = ""  # Default additional ffmpeg parameters for the main encoding command (e.g., "-tune film")
+
+# --- <<< ADDED: Settings File >>> ---
+SETTINGS_FILENAME: str = "converter_settings.json"

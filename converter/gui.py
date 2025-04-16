@@ -1,4 +1,5 @@
 # converter/gui.py
+import json
 import os
 import subprocess
 import time
@@ -39,18 +40,15 @@ class VideoConverterGUI:
         self.transcode_tab = ttk.Frame(self.notebook)
         self.start_tab = ttk.Frame(self.notebook)
         self.about_tab = ttk.Frame(self.notebook)
+        # <<< LATER: Add self.settings_tab here in Commit 2 >>>
 
         # State variables
-        # Keep track_data and embed_ads as Dict/List[Dict] as they are primarily
-        # populated by user interactions before being passed to ffmpeg_utils,
-        # which handles the conversion to dataclasses internally if needed.
-        self.track_data: Dict[str, Dict[str, str]] = {}  # Stores user edits {track_id: {key: value}}
-        self.main_video_duration: Optional[float] = None  # Duration of the input video in seconds
-        # Use StreamParams dataclass for main video parameters after analysis
-        self.main_video_params: Optional[StreamParams] = None  # <<< Has float fps attribute
-        self.embed_ads: List[Dict[str, Any]] = []  # List of ads {'path': str, 'timecode': str, 'duration': float}
-        self.banner_timecodes: List[str] = []  # List of timecodes (MM:SS) for banner display
-        self.temp_files_to_clean: List[str] = []  # List of temporary files generated
+        self.track_data: Dict[str, Dict[str, str]] = {}
+        self.main_video_duration: Optional[float] = None
+        self.main_video_params: Optional[StreamParams] = None
+        self.embed_ads: List[Dict[str, Any]] = []
+        self.banner_timecodes: List[str] = []
+        self.temp_files_to_clean: List[str] = []
 
         # Build UI elements for each tab
         self._create_main_tab_widgets()
@@ -58,6 +56,9 @@ class VideoConverterGUI:
         self._create_transcode_tab_widgets()
         self._create_start_tab_widgets()
         self._create_about_tab_widgets()
+        # <<< LATER: Call _create_settings_tab_widgets() here in Commit 2 >>>
+
+        self._define_widget_map()
 
         # Add tabs to the notebook
         self.notebook.add(self.main_tab, text="Files")
@@ -65,6 +66,7 @@ class VideoConverterGUI:
         self.notebook.add(self.transcode_tab, text="Transcoding")
         self.notebook.add(self.start_tab, text="Start")
         self.notebook.add(self.about_tab, text="About")
+        # <<< LATER: Add Settings tab here in Commit 2 >>>
 
         self.notebook.grid(row=0, column=0, sticky="nsew")
         master.grid_rowconfigure(0, weight=1)
@@ -72,7 +74,33 @@ class VideoConverterGUI:
 
         # Handle window closing
         master.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.ffmpeg_instance: Optional[ffmpeg.FFMPEG] = None  # Instance of the ffmpeg helper class
+        self.ffmpeg_instance: Optional[ffmpeg.FFMPEG] = None
+
+        self._load_settings()
+        # --- <<< END ADDED >>> ---
+
+    def _define_widget_map(self):
+        """Defines the mapping between setting keys and GUI widgets."""
+        # Maps: setting_key -> (widget_instance, widget_type)
+        self.widget_map: Dict[str, Tuple[tk.Widget, str]] = {
+            # Transcoding Tab
+            "video_codec": (self.video_codec_entry, 'entry'),
+            "video_preset": (self.video_preset_entry, 'entry'),
+            "video_cq": (self.video_cq_entry, 'entry'),
+            "video_bitrate": (self.video_bitrate_entry, 'entry'),
+            "video_fps": (self.video_fps_entry, 'entry'),
+            "audio_codec": (self.audio_codec_entry, 'entry'),
+            "audio_bitrate": (self.audio_bitrate_entry, 'entry'),
+            "hwaccel": (self.hwaccel_combo, 'combo'),
+            "additional_encoding": (self.additional_encoding_entry, 'entry'),
+            "encoding_params_str": (self.encoding_entry, 'entry'),  # Manual override
+            # Advertisement Tab
+            "banner_track_pix_fmt": (self.banner_track_pix_fmt_entry, 'entry'),
+            "banner_gap_color": (self.banner_gap_color_entry, 'entry'),
+            "moving_speed": (self.moving_speed_entry, 'entry'),
+            "moving_logo_relative_height": (self.moving_logo_relative_height_entry, 'entry'),
+            "moving_logo_alpha": (self.moving_logo_alpha_entry, 'entry'),
+        }
 
     def _create_main_tab_widgets(self) -> None:
         """Creates widgets for the 'Files' tab."""
@@ -359,7 +387,11 @@ class VideoConverterGUI:
 
     def on_closing(self) -> None:
         """Handles the window close event, ensuring temporary files are cleaned up."""
-        print("Close requested. Cleaning up temporary files...")
+        print("Close requested. Saving settings...")
+        # --- <<< ADDED: Save settings BEFORE cleanup >>> ---
+        self._save_settings()
+        # --- <<< END ADDED >>> ---
+        print("Cleaning up temporary files...")
         self.cleanup_temp_files()
         self.master.destroy()
 
@@ -1288,3 +1320,105 @@ class VideoConverterGUI:
             self.cleanup_temp_files()  # Call cleanup method
             self.output_info.insert(tk.END, "Cleanup finished.\n")
             self.output_info.see(tk.END)
+
+    def _get_settings_filepath(self) -> str:
+        """Gets the full path to the settings file."""
+        # For now, place it in the same directory as the script/executable
+        # In a real app, consider using platform-specific config directories
+        try:
+            # Find the directory containing the currently running script
+            base_path = os.path.dirname(os.path.abspath(__file__))
+        except NameError:
+            # Fallback for environments where __file__ is not defined (e.g., frozen)
+            base_path = os.getcwd()
+        return os.path.join(base_path, config.SETTINGS_FILENAME)
+
+    def _load_settings(self) -> None:
+        """Loads settings from the JSON file and applies them to the GUI."""
+        filepath = self._get_settings_filepath()
+        print(f"Attempting to load settings from: {filepath}")
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                settings_data = json.load(f)
+            print("Settings loaded successfully.")
+
+            for key, value in settings_data.items():
+                if key in self.widget_map:
+                    widget, widget_type = self.widget_map[key]
+                    try:
+                        if widget_type == 'entry':
+                            # Check if widget is an Entry
+                            if isinstance(widget, (tk.Entry, ttk.Entry)):
+                                widget.delete(0, tk.END)
+                                widget.insert(0, str(value))  # Ensure value is string for Entry
+                            else:
+                                print(f"  Warning: Widget for key '{key}' is not an Entry.")
+                        elif widget_type == 'combo':
+                            # Check if widget is a Combobox
+                            if isinstance(widget, ttk.Combobox):
+                                widget.set(str(value))  # Ensure value is string for Combobox
+                            else:
+                                print(f"  Warning: Widget for key '{key}' is not a Combobox.")
+                        # Add more types if needed (e.g., Checkbutton)
+                    except Exception as e:
+                        print(f"  Warning: Could not set widget for key '{key}': {e}")
+                else:
+                    print(f"  Warning: Setting key '{key}' not found in widget map.")
+
+        except FileNotFoundError:
+            print(f"Settings file not found at '{filepath}'. Using default values.")
+            # No action needed, GUI defaults are already set from config.py
+        except json.JSONDecodeError:
+            print(f"Error decoding JSON from '{filepath}'. File might be corrupt. Using default values.")
+            messagebox.showwarning("Settings Error",
+                                   f"Could not read settings file:\n{filepath}\n\nIt might be corrupt. Using default values.")
+        except Exception as e:
+            print(f"Unexpected error loading settings: {e}")
+            messagebox.showerror("Settings Error", f"An unexpected error occurred while loading settings:\n{e}")
+
+    def _save_settings(self) -> None:
+        """Saves current settings from the GUI to the JSON file."""
+        settings_to_save = {}
+        print("Gathering settings to save...")
+
+        for key, (widget, widget_type) in self.widget_map.items():
+            try:
+                value = None
+                if widget_type == 'entry':
+                    if isinstance(widget, (tk.Entry, ttk.Entry)):
+                        value = widget.get()
+                    else:
+                        print(f"  Warning: Cannot get value, widget for key '{key}' is not an Entry.")
+                        continue
+                elif widget_type == 'combo':
+                    if isinstance(widget, ttk.Combobox):
+                        value = widget.get()
+                    else:
+                        print(f"  Warning: Cannot get value, widget for key '{key}' is not a Combobox.")
+                        continue
+                # Add more types if needed
+
+                if value is not None:
+                    settings_to_save[key] = value
+                    # print(f"  Saving: {key} = {value}") # Optional debug log
+                else:
+                    # This case might happen if a widget type is unhandled
+                    print(f"  Warning: Could not retrieve value for key '{key}' (widget type: {widget_type}).")
+
+            except Exception as e:
+                print(f"  Warning: Could not get value for key '{key}': {e}")
+
+        filepath = self._get_settings_filepath()
+        print(f"Attempting to save settings to: {filepath}")
+        try:
+            # Create directory if it doesn't exist (might be needed in future if path changes)
+            # os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(settings_to_save, f, indent=4)  # Use indent for readability
+            print("Settings saved successfully.")
+        except IOError as e:
+            print(f"Error writing settings file to '{filepath}': {e}")
+            messagebox.showerror("Settings Error", f"Could not save settings to:\n{filepath}\n\n{e}")
+        except Exception as e:
+            print(f"Unexpected error saving settings: {e}")
+            messagebox.showerror("Settings Error", f"An unexpected error occurred while saving settings:\n{e}")
