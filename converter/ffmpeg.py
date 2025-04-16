@@ -954,30 +954,31 @@ class FFMPEG:
         return preprocessing_cmds, banner_concat_list_path, temp_files, concatenated_banner_path
 
     def _build_moving_logo_filter(self,
-                                  current_video_input_label: str,  # e.g., [v_banner_out_1] or [0:v]
-                                  moving_input_stream_label: str,  # e.g., [2:v]
+                                  current_video_input_label: str, # e.g., [v_banner_out_1] or [0:v]
+                                  moving_input_stream_label: str, # e.g., [2:v]
                                   transparent_canvas_label: str,  # e.g., [transparent_canvas]
                                   target_params: TargetParams,
                                   final_duration_estimate: float
-                                  ) -> Tuple[List[str], Optional[str]]:
+                                 ) -> Tuple[List[str], Optional[str]]:
         """
         Builds filtergraph parts for:
         1. Preparing the logo (scale, alpha).
         2. Overlaying the animated logo onto a transparent canvas.
-        3. Overlaying the result onto the main video stream.
+        3. Optionally applying motion blur (tmix) to the animated logo.
+        4. Overlaying the result onto the main video stream.
         Returns the list of filter parts and the label of the final output stream.
         """
         filter_parts = []
-        moving_input_index = moving_input_stream_label.strip('[]').split(':')[0]  # For unique labels
+        moving_input_index = moving_input_stream_label.strip('[]').split(':')[0] # For unique labels
 
         # Define intermediate stream labels
         scaled_moving_stream = f"[moving_scaled_{moving_input_index}]"
-        prepared_logo_stream = f"[logo_prepared_{moving_input_index}]"  # Logo with alpha
-        logo_anim_on_canvas_stream = f"[logo_anim_canvas_{moving_input_index}]"  # Logo animated on transparent canvas
-        final_moving_overlay_output_label = f"[v_moving_out_{moving_input_index}]"  # Final output after overlaying on main video
+        prepared_logo_stream = f"[logo_prepared_{moving_input_index}]" # Logo with alpha
+        logo_anim_on_canvas_stream = f"[logo_anim_canvas_{moving_input_index}]" # Logo animated on transparent canvas
+        logo_blurred_stream = f"[logo_blurred_{moving_input_index}]" # Changed from tblend to tmix conceptually
+        final_moving_overlay_output_label = f"[v_moving_out_{moving_input_index}]" # Final output after overlaying on main video
 
-        print(
-            f"  Setting up filter for moving ad (Input: {moving_input_stream_label}, Canvas: {transparent_canvas_label})...")
+        print(f"  Setting up filter for moving ad (Input: {moving_input_stream_label}, Canvas: {transparent_canvas_label})...")
 
         # --- 1. Prepare Logo (Scale + Alpha) ---
         main_h = target_params.height if target_params.height else 720
@@ -986,36 +987,29 @@ class FFMPEG:
         logo_target_h = max(1, int(main_h * self.moving_logo_relative_height))
         sar_value = target_params.sar.replace(':', '/')
         moving_scale_filter = f"scale=-1:{logo_target_h}:flags=bicubic"
-        # Chain scaling and SAR setting
         filter_parts.append(
             f"{moving_input_stream_label}{moving_scale_filter},setsar=sar={sar_value}{scaled_moving_stream}")
-        # Apply alpha
         clamped_alpha = max(0.0, min(1.0, self.moving_logo_alpha))
         alpha_filter = f"format=pix_fmts=rgba,colorchannelmixer=aa={clamped_alpha:.3f}"
         filter_parts.append(f"{scaled_moving_stream}{alpha_filter}{prepared_logo_stream}")
         print(f"    Logo prepared: {prepared_logo_stream}")
 
         # --- 2. Animate Logo on Transparent Canvas ---
-        # Calculate animation parameters (x_expr, y_expr) - same logic as before
         t_total = max(0.1, final_duration_estimate)
         if not isinstance(self.moving_speed, (int, float)) or self.moving_speed <= 0:
             moving_speed = 1.0
         else:
             moving_speed = self.moving_speed
         cycle_t = t_total / moving_speed
-        x_expr, y_expr = "'0'", "'0'"  # Default static
+        x_expr, y_expr = "'0'", "'0'" # Default static
 
         if cycle_t > 0.5:
-            # Use main_w/main_h from the *canvas* stream for calculations
-            # We assume canvas dimensions match target_params.width/height
             canvas_w = target_params.width if target_params.width else 1280
             canvas_h = target_params.height if target_params.height else 720
 
             t1, t2, t3 = cycle_t / 4, cycle_t / 2, 3 * cycle_t / 4
             seg_dur = max(cycle_t / 4, 1e-6)
-            # Use 'W' and 'H' which refer to the *first* input of overlay (the canvas)
-            # But overlay_w/h refer to the second input (the logo)
-            mx, my = f"(W-overlay_w)", f"(H-overlay_h)"
+            mx, my = f"(W-overlay_w)", f"(H-overlay_h)" # W/H refer to canvas (1st input)
             tv = f"mod(t,{cycle_t:.6f})"
 
             x1 = f"{mx}*({tv}/{seg_dur:.6f})"
@@ -1031,36 +1025,75 @@ class FFMPEG:
             y_expr = f"'if(lt({tv},{t1:.6f}),{y1},if(lt({tv},{t2:.6f}),{y2},if(lt({tv},{t3:.6f}),{y3},{y4})))'"
             print(f"    Moving ad animation calculated: Rectangular path ({cycle_t:.2f}s cycle).")
         else:
-            print(
-                f"    Warning: Animation cycle duration ({cycle_t:.3f}s) is too short, logo will be static at top-left.")
+             print(f"    Warning: Animation cycle duration ({cycle_t:.3f}s) is too short, logo will be static at top-left.")
 
-        # Overlay prepared logo onto the transparent canvas using calculated expressions
-        # Inputs: [transparent_canvas_label], [prepared_logo_stream]
-        # Output: [logo_anim_on_canvas_stream]
         overlay_on_canvas_filter = (f"{transparent_canvas_label}{prepared_logo_stream}"
-                                    f"overlay=x={x_expr}:y={y_expr}:shortest=0"  # Animate here
+                                    f"overlay=x={x_expr}:y={y_expr}:shortest=0"
                                     f"{logo_anim_on_canvas_stream}")
         filter_parts.append(overlay_on_canvas_filter)
         print(f"    Animated logo on canvas: {logo_anim_on_canvas_stream}")
 
-        # --- [PLACEHOLDER for Motion Blur Logic - Commits 2+] ---
-        # For now, the stream to use for the final overlay is the direct output
-        # from the animation on canvas.
-        stream_for_final_overlay = logo_anim_on_canvas_stream
-        # Future: stream_for_final_overlay = "[logo_blurred]" or similar
+        # --- 3. Apply Motion Blur (Conditional) ---
+        stream_for_final_overlay = logo_anim_on_canvas_stream # Default to non-blurred stream
 
-        # --- 3. Final Overlay on Main Video ---
-        # Overlay the result (animated logo on transparent background) onto the main video stream
-        # Inputs: [current_video_input_label], [stream_for_final_overlay]
-        # Output: [final_moving_overlay_output_label]
-        # Use simple x=0:y=0 because the positioning is already in stream_for_final_overlay
+        if config.MOVING_LOGO_MOTION_BLUR:
+            print("    Motion blur enabled. Calculating parameters...")
+            final_blur_frames = 1
+            try:
+                if target_params.fps is None or target_params.fps <= 0:
+                    print("      Warning: Cannot apply motion blur, target FPS is invalid.")
+                elif target_params.width is None or target_params.height is None:
+                     print("      Warning: Cannot apply motion blur, target dimensions are unknown.")
+                elif cycle_t <= 0.5:
+                     print("      Skipping motion blur for static logo.")
+                     final_blur_frames = 1
+                else:
+                    fps = target_params.fps
+                    width = target_params.width
+                    height = target_params.height
+                    max_travel_distance = float(max(width, height))
+                    time_to_cross_half_screen = cycle_t / 2.0
+                    pixels_per_second = 0.0
+                    if time_to_cross_half_screen > 1e-6:
+                        pixels_per_second = max_travel_distance / time_to_cross_half_screen
+                    print(f"      Estimated speed: {pixels_per_second:.2f} pixels/sec (approx)")
+                    base_blur_frames = 1.0
+                    if pixels_per_second > 1e-6:
+                         base_blur_frames = fps / pixels_per_second
+                    blur_scaling_factor = 5.0
+                    adjusted_blur_frames = (base_blur_frames
+                                            * config.MOVING_LOGO_BLUR_INTENSITY
+                                            * blur_scaling_factor)
+                    final_blur_frames = max(1, round(adjusted_blur_frames))
+                    print(f"      Calculated tmix frames: {final_blur_frames} (Intensity: {config.MOVING_LOGO_BLUR_INTENSITY})") # <<< UPDATED Log message
+
+                if final_blur_frames > 1:
+                    # <<< CHANGED: Use tmix instead of tblend >>>
+                    tmix_filter = (f"{logo_anim_on_canvas_stream}"
+                                     f"tmix=frames={final_blur_frames}" # Removed weights (default is average)
+                                     f"{logo_blurred_stream}")
+                    # <<< END OF CHANGE >>>
+                    filter_parts.append(tmix_filter)
+                    stream_for_final_overlay = logo_blurred_stream
+                    print(f"    Applied tmix filter. Output: {stream_for_final_overlay}") # <<< UPDATED Log message
+                else:
+                     print("    Calculated blur frames <= 1, skipping tmix filter.") # <<< UPDATED Log message
+
+            except Exception as e:
+                 print(f"      Warning: Error calculating motion blur frames: {e}. Skipping blur.")
+
+        else:
+             print("    Motion blur disabled in config.")
+
+
+        # --- 4. Final Overlay on Main Video ---
         final_overlay_filter = (f"{current_video_input_label}{stream_for_final_overlay}"
-                                f"overlay=x=0:y=0:shortest=0"  # Simple overlay, position is baked in
+                                f"overlay=x=0:y=0:shortest=0"
                                 f"{final_moving_overlay_output_label}")
         filter_parts.append(final_overlay_filter)
 
         print(f"    Final logo overlay added. Output: {final_moving_overlay_output_label}")
-        return filter_parts, final_moving_overlay_output_label  # Return the label of the *final* output
+        return filter_parts, final_moving_overlay_output_label
 
     def _build_filter_complex(self,
                               base_video_specifier: str, base_audio_specifier: Optional[str],
