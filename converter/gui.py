@@ -474,27 +474,23 @@ class VideoConverterGUI:
             self.master.update_idletasks()  # Show message immediately
 
             # Use a temporary FFMPEG instance for analysis
-            # We don't need custom settings for analysis, default is fine.
             ffmpeg_analyzer = ffmpeg.FFMPEG()
 
             # Populate track table and get essential parameters/duration
-            # Pass the analyzer instance to avoid creating multiple FFMPEG objects
-            self.populate_track_table(file_path, ffmpeg_analyzer)  # Also sets self.main_video_duration internally
-            self.main_video_params = ffmpeg_analyzer.get_essential_stream_params(
-                file_path)  # Gets StreamParams with float fps
+            self.populate_track_table(file_path, ffmpeg_analyzer)
+            self.main_video_params = ffmpeg_analyzer.get_essential_stream_params(file_path)
 
             if not self.main_video_params:
                 warning_msg = "Could not retrieve all key parameters from the main video."
                 messagebox.showwarning("Parameter Issue", warning_msg)
                 self.output_info.insert(tk.END, f"WARNING: {warning_msg}\n")
             else:
-                # <<< CHANGED: Use float fps for display, formatted >>>
                 print("Essential video parameters retrieved:", self.main_video_params)
                 fps_display = f"{self.main_video_params.fps:.3f}" if self.main_video_params.fps else "N/A"
                 # Display basic info in the log
                 self.output_info.insert(tk.END,
                                         f"Video Params (WxH): {self.main_video_params.width}x{self.main_video_params.height}, "
-                                        f"FPS: {fps_display}, "  # Display formatted float
+                                        f"FPS: {fps_display}, "
                                         f"PixFmt: {self.main_video_params.pix_fmt}\n")
                 if self.main_video_params.has_audio:
                     self.output_info.insert(tk.END,
@@ -506,20 +502,23 @@ class VideoConverterGUI:
                                             "Audio Params: No audio stream detected or parameters incomplete.\n")
 
                 # Check specifically for width and fps, as they're critical
-                # <<< CHANGED: Check .fps attribute >>>
                 if self.main_video_params.width is None or self.main_video_params.fps is None:
                     error_msg = "Failed to determine video stream parameters (width/height/fps). Please select a different file."
                     messagebox.showerror("Video Error", error_msg)
                     self.output_info.insert(tk.END, f"ERROR: {error_msg}\n")
-                    self._clear_state()  # Reset as the file is unusable
-                    return  # Stop further processing
+                    self._clear_state()
+                    return
 
-                # <<< REMOVED: Do not automatically pre-fill the FPS override field >>>
-                # if self.main_video_params.fps is not None: # <<< REMOVED BLOCK >>>
-                #     self.video_fps_entry.delete(0, tk.END)
-                #     # The override field should take a string, so we don't pre-fill it
-                #     # with the detected float. User enters override manually.
-                #     # self.video_fps_entry.insert(0, str(self.main_video_params.fps)) # <<< REMOVED LINE >>>
+                if self.main_video_params.fps is not None:
+                    self.video_fps_entry.delete(0, tk.END)
+                    # Convert float fps to string for the entry field
+                    # Use a reasonable number of decimal places or just str()
+                    fps_str_for_entry = f"{self.main_video_params.fps:.3f}"  # Or just str(self.main_video_params.fps)
+                    # Handle potential integer FPS cleanly
+                    if fps_str_for_entry.endswith('.000'):
+                        fps_str_for_entry = fps_str_for_entry[:-4]
+                    self.video_fps_entry.insert(0, fps_str_for_entry)
+                    print(f"Pre-filled FPS override field with: {fps_str_for_entry}")
 
             if self.main_video_duration is None:
                 self.output_info.insert(tk.END, "WARNING: Could not determine main video duration from ffprobe.\n")
