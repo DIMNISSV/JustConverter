@@ -30,4 +30,10 @@ The tool provides default settings for common conversion tasks but allows detail
 
 You can read how to install and use this program on the [wiki page](https://github.com/DIMNISSV/JustConverter/wiki).
 
+| Language          | Documentation                                                                |
+| ----------------- | ---------------------------------------------------------------------------- |
+| English           | [User Documentation](https://github.com/DIMNISSV/JustConverter/wiki/User-Documentation-%5BEnglish%5D)           |
+| Русский (Russian) | [Пользовательская документация](https://github.com/DIMNISSV/JustConverter/wiki/Пользовательская-документация-%5BRussian%5D) |
+| 简体中文 (Chinese) | [用户文档](https://github.com/DIMNISSV/JustConverter/wiki/用户文档-【Chinese】)               |
+
 ---
