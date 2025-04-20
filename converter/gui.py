@@ -5,7 +5,7 @@ import subprocess
 import time
 import tkinter as tk
 from tkinter import ttk, filedialog, simpledialog, messagebox
-from typing import List, Dict, Tuple, Optional, Any, Set
+from typing import List, Dict, Tuple, Optional, Any
 
 # Import local modules
 from . import ffmpeg, utils, config
@@ -27,7 +27,8 @@ class VideoConverterGUI:
             master: The root Tkinter window.
         """
         self.master = master
-        self.VERSION = '0.8.0'
+        # Increment patch version for new feature
+        self.VERSION = '0.1.4'
         self.TITLE = "JustConverter + AdBurner"
         self.AUTHOR = "dimnissv"
         master.title(f'{self.TITLE} ({self.AUTHOR}) {self.VERSION}')
@@ -38,9 +39,9 @@ class VideoConverterGUI:
         self.main_tab = ttk.Frame(self.notebook)
         self.advertisement_tab = ttk.Frame(self.notebook)
         self.transcode_tab = ttk.Frame(self.notebook)
+        self.settings_tab = ttk.Frame(self.notebook)
         self.start_tab = ttk.Frame(self.notebook)
         self.about_tab = ttk.Frame(self.notebook)
-        # Planned: self.settings_tab = ttk.Frame(self.notebook)
 
         # State variables
         self.track_data: Dict[str, Dict[str, str]] = {}
@@ -49,22 +50,23 @@ class VideoConverterGUI:
         self.embed_ads: List[Dict[str, Any]] = []
         self.banner_timecodes: List[str] = []
         self.temp_files_to_clean: List[str] = []
+        self.widget_map: dict[str, tk.Entry | ttk.Combobox] = {}
 
         # Build UI elements for each tab
         self._create_main_tab_widgets()
         self._create_advertisement_tab_widgets()
         self._create_transcode_tab_widgets()
+        self._create_settings_tab_widgets()
         self._create_start_tab_widgets()
         self._create_about_tab_widgets()
-        # Planned: self._create_settings_tab_widgets()
 
-        # Add tabs to the notebook
+        # Add tabs to the notebook (Settings tab inserted before Start)
         self.notebook.add(self.main_tab, text="Files")
         self.notebook.add(self.advertisement_tab, text="Advertisement")
         self.notebook.add(self.transcode_tab, text="Transcoding")
+        self.notebook.add(self.settings_tab, text="Settings")
         self.notebook.add(self.start_tab, text="Start")
         self.notebook.add(self.about_tab, text="About")
-        # Planned: self.notebook.add(self.settings_tab, text="Settings")
 
         self.notebook.grid(row=0, column=0, sticky="nsew")
         master.grid_rowconfigure(0, weight=1)
@@ -77,7 +79,6 @@ class VideoConverterGUI:
         master.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.ffmpeg_instance: Optional[ffmpeg.FFMPEG] = None
 
-    # ... (Keep other _create_..._tab_widgets methods as they are) ...
     def _create_main_tab_widgets(self) -> None:
         """Creates widgets for the 'Files' tab."""
         self.input_file_label = tk.Label(self.main_tab, text="Input File:")
@@ -285,6 +286,50 @@ class VideoConverterGUI:
         # Configure resizing
         self.transcode_tab.grid_columnconfigure(1, weight=1)
 
+    def _create_settings_tab_widgets(self) -> None:
+        """Creates widgets for the 'Settings' tab."""
+        self.widget_map = {
+            "video_codec": getattr(self, 'video_codec_entry', None),
+            "video_preset": getattr(self, 'video_preset_entry', None),
+            "video_cq": getattr(self, 'video_cq_entry', None),
+            "video_bitrate": getattr(self, 'video_bitrate_entry', None),
+            "video_fps": getattr(self, 'video_fps_entry', None),
+            "audio_codec": getattr(self, 'audio_codec_entry', None),
+            "audio_bitrate": getattr(self, 'audio_bitrate_entry', None),
+            "hwaccel": getattr(self, 'hwaccel_combo', None),
+            "additional_encoding": getattr(self, 'additional_encoding_entry', None),
+            "banner_track_pix_fmt": getattr(self, 'banner_track_pix_fmt_entry', None),
+            "banner_gap_color": getattr(self, 'banner_gap_color_entry', None),
+            "moving_speed": getattr(self, 'moving_speed_entry', None),
+            "moving_logo_relative_height": getattr(self, 'moving_logo_relative_height_entry', None),
+            "moving_logo_alpha": getattr(self, 'moving_logo_alpha_entry', None),
+        }
+        settings_frame = ttk.LabelFrame(self.settings_tab, text="Manage Settings", padding=10)
+        settings_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        self.settings_tab.grid_columnconfigure(0, weight=1)  # Allow frame to expand
+
+        # Save Settings Button
+        self.save_settings_button = tk.Button(settings_frame, text="Save Current Settings",
+                                              command=self._save_settings)
+        self.save_settings_button.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+
+        # Load Settings Button
+        self.load_settings_button = tk.Button(settings_frame, text="Load Settings from File",
+                                              command=self._load_settings_manual)  # Use manual load function
+        self.load_settings_button.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+
+        # Reset Settings Button
+        self.reset_settings_button = tk.Button(settings_frame, text="Reset Settings to Defaults",
+                                               command=self._reset_settings_to_defaults)
+        self.reset_settings_button.grid(row=2, column=0, padx=5, pady=5, sticky="w")
+
+        # Add some explanation
+        explanation_label = tk.Label(settings_frame,
+                                     text="Settings are automatically saved on exit and loaded on startup.\n"
+                                          f"Default file: {config.SETTINGS_FILENAME}",
+                                     justify=tk.LEFT, wraplength=350)
+        explanation_label.grid(row=3, column=0, columnspan=2, padx=5, pady=10, sticky="w")
+
     def _create_start_tab_widgets(self) -> None:
         """Creates widgets for the 'Start' tab."""
         # Output File Selection
@@ -414,10 +459,17 @@ class VideoConverterGUI:
         self.master.update_idletasks()
         print("Partial state reset complete.")
 
-    def _load_settings(self) -> None:
-        """Loads settings from the JSON file and populates the GUI fields."""
+    def _load_settings(self, settings_file_path: Optional[str] = None) -> None:
+        """
+        Loads settings from the specified JSON file (or default) and populates the GUI fields.
+
+        Args:
+            settings_file_path: Path to the settings file. If None, uses default from config.
+        """
+        if settings_file_path is None:
+            settings_file_path = config.SETTINGS_FILENAME
+
         settings = {}
-        settings_file_path = config.SETTINGS_FILENAME
         defaults = {
             # Transcoding Tab
             "video_codec": config.VIDEO_CODEC,
@@ -429,7 +481,7 @@ class VideoConverterGUI:
             "audio_bitrate": config.AUDIO_BITRATE,
             "hwaccel": config.HWACCEL,
             "additional_encoding": config.ADDITIONAL_ENCODING,
-            # Advertisement Tab (paths are generally not saved, only parameters)
+            # Advertisement Tab
             "banner_track_pix_fmt": config.BANNER_TRACK_PIX_FMT,
             "banner_gap_color": config.BANNER_GAP_COLOR,
             "moving_speed": str(config.MOVING_SPEED),
@@ -451,91 +503,110 @@ class VideoConverterGUI:
 
         # --- Helper to safely set widget values ---
         def set_widget_value(widget, value):
-            # <<< No changes needed inside the helper itself >>>
             if widget is None: return
             try:
                 if isinstance(widget, ttk.Combobox):
-                    # Ensure the value exists in the combobox list before setting
                     if value in widget['values']:
                         widget.set(str(value))
                     else:
                         print(f"Warning: Value '{value}' not found in Combobox options. Using default.")
-                        # Attempt to set default from config if possible
-                        # Now widget.settings_key should exist
                         default_val = defaults.get(widget.settings_key, "")
                         if default_val in widget['values']:
                             widget.set(default_val)
                         else:
-                            widget.set(widget['values'][0] if widget['values'] else "")  # Fallback
+                            widget.set(widget['values'][0] if widget['values'] else "")
                 elif isinstance(widget, tk.Entry):
                     widget.delete(0, tk.END)
-                    widget.insert(0, str(value))  # Ensure string conversion
+                    widget.insert(0, str(value))
             except Exception as e:
                 print(f"Error setting widget value '{value}': {e}")
 
-        # --- Map settings keys to widgets ---
-        widget_map = {
-            # Transcoding Tab
-            "video_codec": getattr(self, 'video_codec_entry', None),
-            "video_preset": getattr(self, 'video_preset_entry', None),
-            "video_cq": getattr(self, 'video_cq_entry', None),
-            "video_bitrate": getattr(self, 'video_bitrate_entry', None),
-            "video_fps": getattr(self, 'video_fps_entry', None),
-            "audio_codec": getattr(self, 'audio_codec_entry', None),
-            "audio_bitrate": getattr(self, 'audio_bitrate_entry', None),
-            "hwaccel": getattr(self, 'hwaccel_combo', None),
-            "additional_encoding": getattr(self, 'additional_encoding_entry', None),
-            # Advertisement Tab
-            "banner_track_pix_fmt": getattr(self, 'banner_track_pix_fmt_entry', None),
-            "banner_gap_color": getattr(self, 'banner_gap_color_entry', None),
-            "moving_speed": getattr(self, 'moving_speed_entry', None),
-            "moving_logo_relative_height": getattr(self, 'moving_logo_relative_height_entry', None),
-            "moving_logo_alpha": getattr(self, 'moving_logo_alpha_entry', None),
-        }
-
         # --- Populate widgets ---
         applied_settings = 0
-        for key, widget in widget_map.items():
+        for key, widget in self.widget_map.items():
             if widget:
-                # <<< FIXED: Assign the settings key BEFORE calling set_widget_value >>>
-                widget.settings_key = key
-                # Get value from loaded settings, fallback to defaults dict
+                widget.settings_key = key  # Assign key for default lookup
                 value_to_set = settings.get(key, defaults.get(key, ""))
-                set_widget_value(widget, value_to_set)  # Now helper can use widget.settings_key
+                set_widget_value(widget, value_to_set)
                 applied_settings += 1
             else:
                 print(f"Warning: Widget for setting '{key}' not found during load.")
 
         print(f"Applied {applied_settings} settings to GUI widgets.")
 
+    def _load_settings_manual(self) -> None:
+        """Handles the 'Load Settings' button click."""
+        # For now, just reload from the default file.
+        # Could be extended later to ask for a file path.
+        if messagebox.askokcancel("Load Settings",
+                                  f"This will reload settings from '{config.SETTINGS_FILENAME}' and overwrite current fields.\nContinue?"):
+            print("Manual settings load requested.")
+            self._load_settings()
+            messagebox.showinfo("Settings Loaded", f"Settings loaded from '{config.SETTINGS_FILENAME}'.")
+
+    def _reset_settings_to_defaults(self) -> None:
+        """Resets settings fields in the GUI to their default values from config.py."""
+        if not messagebox.askyesno("Reset Settings?",
+                                   "Reset all transcoding and advertisement parameters to their default values?"):
+            return
+
+        print("Resetting settings to defaults...")
+        defaults = {
+            # Transcoding Tab
+            "video_codec": config.VIDEO_CODEC,
+            "video_preset": config.VIDEO_PRESET,
+            "video_cq": config.VIDEO_CQ,
+            "video_bitrate": config.VIDEO_BITRATE,
+            "video_fps": "",  # Default FPS override is empty
+            "audio_codec": config.AUDIO_CODEC,
+            "audio_bitrate": config.AUDIO_BITRATE,
+            "hwaccel": config.HWACCEL,
+            "additional_encoding": config.ADDITIONAL_ENCODING,
+            # Advertisement Tab
+            "banner_track_pix_fmt": config.BANNER_TRACK_PIX_FMT,
+            "banner_gap_color": config.BANNER_GAP_COLOR,
+            "moving_speed": str(config.MOVING_SPEED),
+            "moving_logo_relative_height": f"{config.MOVING_LOGO_RELATIVE_HEIGHT:.3f}",
+            "moving_logo_alpha": str(config.MOVING_LOGO_ALPHA),
+        }
+
+        # --- Helper to safely set widget values (same as in _load_settings) ---
+        def set_widget_value(widget, value):
+            if widget is None: return
+            try:
+                if isinstance(widget, ttk.Combobox):
+                    if value in widget['values']:
+                        widget.set(str(value))
+                    else:  # Should not happen with defaults if lists are correct
+                        widget.set(widget['values'][0] if widget['values'] else "")
+                elif isinstance(widget, tk.Entry):
+                    widget.delete(0, tk.END)
+                    widget.insert(0, str(value))
+            except Exception as e:
+                print(f"Error setting widget default value '{value}': {e}")
+
+        # --- Reset widgets ---
+        reset_count = 0
+        for key, widget in self.widget_map.items():
+            if widget:
+                widget.settings_key = key  # Assign key (though not strictly needed for reset)
+                value_to_set = defaults.get(key, "")  # Get default value
+                set_widget_value(widget, value_to_set)
+                reset_count += 1
+            else:
+                print(f"Warning: Widget for setting '{key}' not found during reset.")
+
+        print(f"Reset {reset_count} settings fields to defaults.")
+        messagebox.showinfo("Settings Reset", "Settings fields have been reset to their default values.")
+
     def _save_settings(self) -> None:
         """Saves current settings from GUI fields to the JSON file."""
         settings_to_save = {}
         settings_file_path = config.SETTINGS_FILENAME
 
-        # --- Map settings keys to widgets (similar to load) ---
-        widget_map = {
-            # Transcoding Tab
-            "video_codec": getattr(self, 'video_codec_entry', None),
-            "video_preset": getattr(self, 'video_preset_entry', None),
-            "video_cq": getattr(self, 'video_cq_entry', None),
-            "video_bitrate": getattr(self, 'video_bitrate_entry', None),
-            "video_fps": getattr(self, 'video_fps_entry', None),
-            "audio_codec": getattr(self, 'audio_codec_entry', None),
-            "audio_bitrate": getattr(self, 'audio_bitrate_entry', None),
-            "hwaccel": getattr(self, 'hwaccel_combo', None),
-            "additional_encoding": getattr(self, 'additional_encoding_entry', None),
-            # Advertisement Tab
-            "banner_track_pix_fmt": getattr(self, 'banner_track_pix_fmt_entry', None),
-            "banner_gap_color": getattr(self, 'banner_gap_color_entry', None),
-            "moving_speed": getattr(self, 'moving_speed_entry', None),
-            "moving_logo_relative_height": getattr(self, 'moving_logo_relative_height_entry', None),
-            "moving_logo_alpha": getattr(self, 'moving_logo_alpha_entry', None),
-        }
-
         # --- Collect values from widgets ---
         collected_count = 0
-        for key, widget in widget_map.items():
+        for key, widget in self.widget_map.items():
             if widget:
                 try:
                     value = widget.get().strip()
