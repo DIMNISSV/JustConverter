@@ -28,7 +28,7 @@ class VideoConverterGUI:
         """
         self.master = master
         # Increment patch version for new feature
-        self.VERSION = '0.1.4'
+        self.VERSION = '0.8.1'
         self.TITLE = "JustConverter + AdBurner"
         self.AUTHOR = "dimnissv"
         master.title(f'{self.TITLE} ({self.AUTHOR}) {self.VERSION}')
