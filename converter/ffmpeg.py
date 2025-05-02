@@ -19,9 +19,9 @@ class StreamParams:
     height: Optional[int] = None
     pix_fmt: Optional[str] = None
     sar: str = '1:1'
-    par: Optional[str] = None  # Note: PAR is often derived, SAR is usually more fundamental from probe
+    par: Optional[str] = None
     time_base_v: Optional[str] = None
-    fps: Optional[float] = None  # <<< CHANGED: Changed from fps_str to fps (float)
+    fps: Optional[float] = None  #
     sample_rate: Optional[int] = None
     channel_layout: Optional[str] = None
     sample_fmt: Optional[str] = None
@@ -35,7 +35,7 @@ class TargetParams:
     width: Optional[int] = None
     height: Optional[int] = None
     sar: str = '1:1'
-    fps: Optional[float] = None  # <<< CHANGED: Changed from fps_str to fps (float)
+    fps: Optional[float] = None
     pix_fmt: str = 'yuv420p'
     v_timebase: Optional[str] = None
     sample_rate: Optional[int] = None
@@ -217,12 +217,12 @@ class FFMPEG:
 
     def get_essential_stream_params(self, file_path: str) -> Optional[StreamParams]:
         """Gets key video and audio parameters needed for compatibility checks using ffprobe."""
-        params = StreamParams()  # Instantiate the dataclass with defaults
+        params = StreamParams()
         if not file_path or not os.path.exists(file_path): return None
 
+        # --- Видео часть (без изменений) ---
         has_video_stream = False
         try:
-            # Probe video stream first
             cmd_video = ["ffprobe", "-v", "error", "-select_streams", "v:0",
                          "-show_entries",
                          "stream=width,height,pix_fmt,sample_aspect_ratio,display_aspect_ratio,r_frame_rate,time_base,codec_name",
@@ -230,16 +230,12 @@ class FFMPEG:
             data_v = self.run_ffprobe(cmd_video)
             if data_v.get("streams"):
                 stream_v = data_v["streams"][0]
-                # Use integer conversion where appropriate
                 params.width = stream_v.get('width')
                 params.height = stream_v.get('height')
                 params.pix_fmt = stream_v.get('pix_fmt')
-                # Ensure SAR is valid or default
                 sar_str = stream_v.get('sample_aspect_ratio', '1:1')
                 params.sar = sar_str if ':' in sar_str and len(sar_str.split(':')) == 2 else '1:1'
                 params.time_base_v = stream_v.get('time_base')
-
-                # <<< CHANGED: Get FPS string and convert to float >>>
                 fps_str = stream_v.get('r_frame_rate')
                 if fps_str and '/' in fps_str:
                     try:
@@ -249,112 +245,149 @@ class FFMPEG:
                         if den != 0:
                             params.fps = num / den
                         else:
-                            params.fps = None  # Avoid division by zero
+                            params.fps = None
                     except (ValueError, TypeError):
-                        params.fps = None  # Handle parsing errors
-                elif fps_str:  # Handle integer FPS strings like "25"
+                        params.fps = None
+                elif fps_str:
                     try:
                         params.fps = float(fps_str)
                     except (ValueError, TypeError):
                         params.fps = None
                 else:
-                    params.fps = None  # No FPS string found
-
-                # Check if essential video params were found (using params.fps now)
+                    params.fps = None
                 if all([params.width, params.height, params.fps, params.time_base_v]):
                     has_video_stream = True
-                    # Provide a default pix_fmt if missing but other params are present
                     if not params.pix_fmt: params.pix_fmt = 'yuv420p'
-            # Clean up SAR again just in case ffprobe returned something weird
             if ':' not in params.sar or len(params.sar.split(':')) != 2: params.sar = '1:1'
-
         except FfprobeError:
-            pass  # Expected if no video stream exists
+            pass
         except Exception as e:
             print(f"Unexpected error probing video stream for {file_path}: {e}")
 
-        # If no video stream, check if it's a known image format
         if not has_video_stream:
+            # ... (логика для изображений без изменений) ...
             try:
                 cmd_format = ["ffprobe", "-v", "error", "-show_entries", "format=format_name", "-of", "json", file_path]
                 data_fmt = self.run_ffprobe(cmd_format)
                 format_name = data_fmt.get("format", {}).get("format_name", "")
-                # List of common image muxer/pipe formats reported by ffprobe
                 image_formats = ['image2', 'png_pipe', 'mjpeg', 'webp_pipe', 'gif', 'tiff_pipe', 'bmp_pipe',
                                  'jpeg_pipe',
                                  'ppm_pipe', 'pgm_pipe', 'pbm_pipe', 'apng']
                 if any(fmt in format_name for fmt in image_formats):
-                    # Try getting image stream info
-                    cmd_img_stream = ["ffprobe", "-v", "error", "-select_streams", "0",  # Select first stream
+                    cmd_img_stream = ["ffprobe", "-v", "error", "-select_streams", "0",
                                       "-show_entries", "stream=width,height,pix_fmt,codec_type", "-of", "json",
                                       file_path]
                     data_img_s = self.run_ffprobe(cmd_img_stream)
                     if data_img_s.get("streams"):
                         stream_img = data_img_s["streams"][0]
-                        if stream_img.get('codec_type') == 'video':  # Ensure it's treated as video
+                        if stream_img.get('codec_type') == 'video':
                             params.width = stream_img.get('width')
                             params.height = stream_img.get('height')
-                            params.pix_fmt = stream_img.get('pix_fmt', 'rgb24')  # Default for images
-                            params.fps = 25.0  # <<< CHANGED: Assign a default float FPS for images
-                            params.time_base_v = '1/25'  # Assign a default timebase
-                            params.sar = '1:1'  # Assume square pixels
+                            params.pix_fmt = stream_img.get('pix_fmt', 'rgb24')
+                            params.fps = 25.0
+                            params.time_base_v = '1/25'
+                            params.sar = '1:1'
                             print(
                                 f"Info: {os.path.basename(file_path)} detected as image format ({format_name}). Using defaults.")
-                            # has_video_stream = True # Treat image as video for processing
             except FfprobeError:
-                pass  # Expected if format or image stream probe fails
+                pass
             except Exception as e:
                 print(f"Unexpected error handling potential image file {file_path}: {e}")
 
-        # If we still lack essential video parameters, fail
-        if not all([params.width, params.height, params.fps]):  # <<< CHANGED: Check params.fps
+        if not all([params.width, params.height, params.fps]):
             print(f"Critical Error: Could not determine essential video parameters (width/height/fps) for {file_path}.")
             return None
 
-        # Now probe for audio stream
+        # --- Аудио часть (с изменениями) ---
+        params.has_audio = False  # Сначала считаем, что аудио нет
         try:
+            # Запрашиваем больше полей, включая codec_type и channels
             cmd_audio = ["ffprobe", "-v", "error", "-select_streams", "a:0",
-                         "-show_entries", "stream=sample_rate,channel_layout,sample_fmt,time_base", "-of", "json",
-                         file_path]
+                         "-show_entries", "stream=codec_type,sample_rate,channel_layout,channels,sample_fmt,time_base",
+                         "-of", "json", file_path]
             data_a = self.run_ffprobe(cmd_audio)
+
             if data_a.get("streams"):
                 stream_a = data_a["streams"][0]
-                try:
-                    params.sample_rate = int(stream_a.get('sample_rate')) if stream_a.get('sample_rate') else None
-                except ValueError:
-                    params.sample_rate = None  # Handle non-integer sample rate
-                params.channel_layout = stream_a.get('channel_layout')
-                params.sample_fmt = stream_a.get('sample_fmt')
-                params.time_base_a = stream_a.get('time_base')
-                # Check if essential audio params were found
-                if all([params.sample_rate, params.channel_layout, params.sample_fmt, params.time_base_a]):
-                    params.has_audio = True
-                else:
-                    params.has_audio = False  # Mark as no audio if params are incomplete
+                codec_type = stream_a.get('codec_type')
+
+                # Проверяем, что это действительно аудиопоток и есть sample_rate
+                if codec_type == 'audio' and stream_a.get('sample_rate'):
+                    params.has_audio = True  # Аудио есть!
+                    print(f"Audio stream found for {file_path}.")
+                    try:
+                        params.sample_rate = int(stream_a.get('sample_rate'))
+                    except (ValueError, TypeError):
+                        params.sample_rate = None
+                        params.has_audio = False  # Считаем невалидным без sample_rate
+                        print(f"  Warning: Invalid sample rate found.")
+
+                    params.channel_layout = stream_a.get('channel_layout')
+                    params.sample_fmt = stream_a.get('sample_fmt')
+                    params.time_base_a = stream_a.get('time_base')
+
+                    # Если channel_layout не определен, пытаемся использовать channels
+                    if not params.channel_layout:
+                        channels = stream_a.get('channels')
+                        if channels:
+                            try:
+                                num_channels = int(channels)
+                                # Пытаемся угадать стандартный layout
+                                if num_channels == 1:
+                                    params.channel_layout = 'mono'
+                                elif num_channels == 2:
+                                    params.channel_layout = 'stereo'
+                                # Можно добавить больше каналов, но 'mono' и 'stereo' самые частые для WAV
+                                print(
+                                    f"  Info: channel_layout not found, derived '{params.channel_layout}' from channels={channels}.")
+                            except (ValueError, TypeError):
+                                print(f"  Warning: Could not parse channels: {channels}")
+                        else:
+                            print(f"  Warning: Could not determine channel layout or channels.")
+
+                    # Дополнительная проверка: если sample_rate все же не удалось получить, сбрасываем has_audio
+                    if params.sample_rate is None:
+                        params.has_audio = False
+
             else:
-                params.has_audio = False  # No audio stream found
+                print(f"No audio stream found in {file_path}.")
+
         except FfprobeError:
-            params.has_audio = False  # Expected if no audio stream
+            print(f"ffprobe failed to get audio info for {file_path} (may not have audio).")
         except Exception as e:
             print(f"Unexpected error probing audio stream for {file_path}: {e}")
-            params.has_audio = False
 
-        # Normalize/Default potentially problematic values
+        # --- Нормализация и установка дефолтов (часть без изменений) ---
         common_pix_fmts = ['yuv420p', 'yuvj420p', 'yuv422p', 'yuvj422p', 'yuv444p', 'yuvj444p', 'nv12', 'nv21',
                            'yuva420p', 'rgba', 'bgra', 'rgb24', 'gray', 'gbrp', 'yuv420p10le']
-        # Use a safe default if the detected pix_fmt is uncommon or potentially incompatible
         if params.pix_fmt not in common_pix_fmts:
             print(f"Warning: Uncommon pix_fmt '{params.pix_fmt}' detected for {file_path}. Defaulting to 'yuv420p'.")
             params.pix_fmt = 'yuv420p'
-
-        # Ensure SAR is valid one last time
         if ':' not in params.sar or len(params.sar.split(':')) != 2: params.sar = '1:1'
 
-        # Default audio parameters if audio exists but some info was missing
+        # Установка дефолтов для аудио, ЕСЛИ оно было найдено (params.has_audio is True)
+        # но какие-то параметры не определились
         if params.has_audio:
-            if not params.channel_layout: params.channel_layout = 'stereo'  # Common default
-            if not params.sample_fmt: params.sample_fmt = 'fltp'  # Common default for AAC/Opus
+            if not params.channel_layout:
+                print(f"  Warning: Using default channel layout 'stereo' as it couldn't be determined.")
+                params.channel_layout = 'stereo'
+            if not params.sample_fmt:
+                # Для перекодирования в AAC/Opus нужен float, для PCM можно оставить исходный,
+                # но для универсальности можно задать целевой формат здесь.
+                # Оставим пока None, чтобы фильтр aformat использовал целевой sample_fmt из TargetParams
+                print(
+                    f"  Info: sample_fmt not found. Target format '{config.AUDIO_CODEC}' will use its default/target.")
+                pass  # params.sample_fmt останется None
+            if not params.time_base_a:
+                # Попытаться вычислить из sample_rate? Обычно это 1/sample_rate
+                if params.sample_rate:
+                    params.time_base_a = f"1/{params.sample_rate}"
+                    print(f"  Info: time_base_a not found, derived '{params.time_base_a}' from sample rate.")
+                else:
+                    # Если и sample_rate нет, то аудио все равно будет отключено выше
+                    print(f"  Warning: time_base_a could not be determined.")
 
+        print(f"Essential params check result for {os.path.basename(file_path)}: Has Audio = {params.has_audio}")
         return params
 
     @staticmethod
@@ -954,12 +987,12 @@ class FFMPEG:
         return preprocessing_cmds, banner_concat_list_path, temp_files, concatenated_banner_path
 
     def _build_moving_logo_filter(self,
-                                  current_video_input_label: str, # e.g., [v_banner_out_1] or [0:v]
-                                  moving_input_stream_label: str, # e.g., [2:v]
+                                  current_video_input_label: str,  # e.g., [v_banner_out_1] or [0:v]
+                                  moving_input_stream_label: str,  # e.g., [2:v]
                                   transparent_canvas_label: str,  # e.g., [transparent_canvas]
                                   target_params: TargetParams,
                                   final_duration_estimate: float
-                                 ) -> Tuple[List[str], Optional[str]]:
+                                  ) -> Tuple[List[str], Optional[str]]:
         """
         Builds filtergraph parts for:
         1. Preparing the logo (scale, alpha).
@@ -969,16 +1002,17 @@ class FFMPEG:
         Returns the list of filter parts and the label of the final output stream.
         """
         filter_parts = []
-        moving_input_index = moving_input_stream_label.strip('[]').split(':')[0] # For unique labels
+        moving_input_index = moving_input_stream_label.strip('[]').split(':')[0]  # For unique labels
 
         # Define intermediate stream labels
         scaled_moving_stream = f"[moving_scaled_{moving_input_index}]"
-        prepared_logo_stream = f"[logo_prepared_{moving_input_index}]" # Logo with alpha
-        logo_anim_on_canvas_stream = f"[logo_anim_canvas_{moving_input_index}]" # Logo animated on transparent canvas
-        logo_blurred_stream = f"[logo_blurred_{moving_input_index}]" # Changed from tblend to tmix conceptually
-        final_moving_overlay_output_label = f"[v_moving_out_{moving_input_index}]" # Final output after overlaying on main video
+        prepared_logo_stream = f"[logo_prepared_{moving_input_index}]"  # Logo with alpha
+        logo_anim_on_canvas_stream = f"[logo_anim_canvas_{moving_input_index}]"  # Logo animated on transparent canvas
+        logo_blurred_stream = f"[logo_blurred_{moving_input_index}]"  # Changed from tblend to tmix conceptually
+        final_moving_overlay_output_label = f"[v_moving_out_{moving_input_index}]"  # Final output after overlaying on main video
 
-        print(f"  Setting up filter for moving ad (Input: {moving_input_stream_label}, Canvas: {transparent_canvas_label})...")
+        print(
+            f"  Setting up filter for moving ad (Input: {moving_input_stream_label}, Canvas: {transparent_canvas_label})...")
 
         # --- 1. Prepare Logo (Scale + Alpha) ---
         main_h = target_params.height if target_params.height else 720
@@ -1001,7 +1035,7 @@ class FFMPEG:
         else:
             moving_speed = self.moving_speed
         cycle_t = t_total / moving_speed
-        x_expr, y_expr = "'0'", "'0'" # Default static
+        x_expr, y_expr = "'0'", "'0'"  # Default static
 
         if cycle_t > 0.5:
             canvas_w = target_params.width if target_params.width else 1280
@@ -1009,7 +1043,7 @@ class FFMPEG:
 
             t1, t2, t3 = cycle_t / 4, cycle_t / 2, 3 * cycle_t / 4
             seg_dur = max(cycle_t / 4, 1e-6)
-            mx, my = f"(W-overlay_w)", f"(H-overlay_h)" # W/H refer to canvas (1st input)
+            mx, my = f"(W-overlay_w)", f"(H-overlay_h)"  # W/H refer to canvas (1st input)
             tv = f"mod(t,{cycle_t:.6f})"
 
             x1 = f"{mx}*({tv}/{seg_dur:.6f})"
@@ -1025,7 +1059,8 @@ class FFMPEG:
             y_expr = f"'if(lt({tv},{t1:.6f}),{y1},if(lt({tv},{t2:.6f}),{y2},if(lt({tv},{t3:.6f}),{y3},{y4})))'"
             print(f"    Moving ad animation calculated: Rectangular path ({cycle_t:.2f}s cycle).")
         else:
-             print(f"    Warning: Animation cycle duration ({cycle_t:.3f}s) is too short, logo will be static at top-left.")
+            print(
+                f"    Warning: Animation cycle duration ({cycle_t:.3f}s) is too short, logo will be static at top-left.")
 
         overlay_on_canvas_filter = (f"{transparent_canvas_label}{prepared_logo_stream}"
                                     f"overlay=x={x_expr}:y={y_expr}:shortest=0"
@@ -1034,7 +1069,7 @@ class FFMPEG:
         print(f"    Animated logo on canvas: {logo_anim_on_canvas_stream}")
 
         # --- 3. Apply Motion Blur (Conditional) ---
-        stream_for_final_overlay = logo_anim_on_canvas_stream # Default to non-blurred stream
+        stream_for_final_overlay = logo_anim_on_canvas_stream  # Default to non-blurred stream
 
         if config.MOVING_LOGO_MOTION_BLUR:
             print("    Motion blur enabled. Calculating parameters...")
@@ -1043,10 +1078,10 @@ class FFMPEG:
                 if target_params.fps is None or target_params.fps <= 0:
                     print("      Warning: Cannot apply motion blur, target FPS is invalid.")
                 elif target_params.width is None or target_params.height is None:
-                     print("      Warning: Cannot apply motion blur, target dimensions are unknown.")
+                    print("      Warning: Cannot apply motion blur, target dimensions are unknown.")
                 elif cycle_t <= 0.5:
-                     print("      Skipping motion blur for static logo.")
-                     final_blur_frames = 1
+                    print("      Skipping motion blur for static logo.")
+                    final_blur_frames = 1
                 else:
                     fps = target_params.fps
                     width = target_params.width
@@ -1059,32 +1094,32 @@ class FFMPEG:
                     print(f"      Estimated speed: {pixels_per_second:.2f} pixels/sec (approx)")
                     base_blur_frames = 1.0
                     if pixels_per_second > 1e-6:
-                         base_blur_frames = fps / pixels_per_second
+                        base_blur_frames = fps / pixels_per_second
                     blur_scaling_factor = 5.0
                     adjusted_blur_frames = (base_blur_frames
                                             * config.MOVING_LOGO_BLUR_INTENSITY
                                             * blur_scaling_factor)
                     final_blur_frames = max(1, round(adjusted_blur_frames))
-                    print(f"      Calculated tmix frames: {final_blur_frames} (Intensity: {config.MOVING_LOGO_BLUR_INTENSITY})") # <<< UPDATED Log message
+                    print(
+                        f"      Calculated tmix frames: {final_blur_frames} (Intensity: {config.MOVING_LOGO_BLUR_INTENSITY})")  # <<< UPDATED Log message
 
                 if final_blur_frames > 1:
                     # <<< CHANGED: Use tmix instead of tblend >>>
                     tmix_filter = (f"{logo_anim_on_canvas_stream}"
-                                     f"tmix=frames={final_blur_frames}" # Removed weights (default is average)
-                                     f"{logo_blurred_stream}")
+                                   f"tmix=frames={final_blur_frames}"  # Removed weights (default is average)
+                                   f"{logo_blurred_stream}")
                     # <<< END OF CHANGE >>>
                     filter_parts.append(tmix_filter)
                     stream_for_final_overlay = logo_blurred_stream
-                    print(f"    Applied tmix filter. Output: {stream_for_final_overlay}") # <<< UPDATED Log message
+                    print(f"    Applied tmix filter. Output: {stream_for_final_overlay}")  # <<< UPDATED Log message
                 else:
-                     print("    Calculated blur frames <= 1, skipping tmix filter.") # <<< UPDATED Log message
+                    print("    Calculated blur frames <= 1, skipping tmix filter.")  # <<< UPDATED Log message
 
             except Exception as e:
-                 print(f"      Warning: Error calculating motion blur frames: {e}. Skipping blur.")
+                print(f"      Warning: Error calculating motion blur frames: {e}. Skipping blur.")
 
         else:
-             print("    Motion blur disabled in config.")
-
+            print("    Motion blur disabled in config.")
 
         # --- 4. Final Overlay on Main Video ---
         final_overlay_filter = (f"{current_video_input_label}{stream_for_final_overlay}"
