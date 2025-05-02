@@ -28,10 +28,9 @@ class VideoConverterGUI:
         """
         self.master = master
         # Increment patch version for new feature
-        self.VERSION = '0.8.1'
         self.TITLE = "JustConverter + AdBurner"
         self.AUTHOR = "dimnissv"
-        master.title(f'{self.TITLE} ({self.AUTHOR}) {self.VERSION}')
+        master.title(f'{self.TITLE} ({self.AUTHOR})')
 
         self.notebook = ttk.Notebook(master)
 
@@ -372,7 +371,6 @@ class VideoConverterGUI:
 
         info_text_content = (
             f"Program: {self.TITLE}\n"
-            f"Version: {self.VERSION}\n"
             f"Author: {self.AUTHOR}\n\n"
             "This tool allows converting video files while optionally embedding advertisements, adding banner overlays, and adding moving logos using ffmpeg.\n\n"
         )
