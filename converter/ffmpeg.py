@@ -650,7 +650,7 @@ class FFMPEG:
             # Ensure required audio parameters are present
             if target_params.sample_rate and target_params.sample_fmt and target_params.channel_layout:
                 af_parts = [
-                    f"aresample=resampler=soxr:osr={target_params.sample_rate}",  # Resample audio
+                    f"aresample=osr={target_params.sample_rate}",  # Resample audio
                     f"aformat=sample_fmts={target_params.sample_fmt}:channel_layouts={target_params.channel_layout}"
                     # Format audio
                 ]
