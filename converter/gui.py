@@ -133,6 +133,7 @@ class VideoConverterGUI:
         self.embed_timecodes_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.embed_timecodes_entry = tk.Entry(self.advertisement_tab, width=20)
         self.embed_timecodes_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        self.embed_timecodes_entry.bind("<KeyRelease>", self._format_timecode_entry, add='+')
         self.add_embed_timecode_button = tk.Button(self.advertisement_tab, text="Add",
                                                    command=self.add_embed_timecode)
         self.add_embed_timecode_button.grid(row=1, column=2, padx=5, pady=5, sticky="w")
@@ -158,6 +159,7 @@ class VideoConverterGUI:
         self.banner_timecodes_label = tk.Label(self.advertisement_tab, text="Display Timecodes (MM:SS or HH:MM:SS):")
         self.banner_timecodes_label.grid(row=4, column=0, padx=5, pady=5, sticky="w")
         self.banner_timecodes_entry = tk.Entry(self.advertisement_tab, width=20)
+        self.banner_timecodes_entry.bind("<KeyRelease>", self._format_timecode_entry, add='+')
         self.banner_timecodes_entry.grid(row=4, column=1, padx=5, pady=5, sticky="w")
         self.add_banner_timecode_button = tk.Button(self.advertisement_tab, text="Add",
                                                     command=self.add_banner_timecode)
@@ -1240,6 +1242,55 @@ class VideoConverterGUI:
             traceback.print_exc()
             self.cleanup_temp_files()
             return None
+
+    def _get_digits(self, text: str) -> str:
+        """Returns only numbers from the line."""
+        return "".join(filter(str.isdigit, text))
+
+    def _format_timecode_entry(self, event: tk.Event) -> None:
+        """Automatically formates input in the field of time (mm: SS or PH: MM: SS)."""
+        widget = event.widget
+        current_text = widget.get()
+        digits = self._get_digits(current_text)
+        formatted_text = ""
+        cursor_pos = widget.index(tk.INSERT) # Запоминаем позицию курсора
+
+        # Определяем максимальную длину и позиции двоеточий
+        # Пока для простоты сделаем до ЧЧ:ММ:СС (6 цифр)
+        max_digits = 6
+
+        if len(digits) > max_digits:
+            digits = digits[:max_digits] # Обрезаем лишние цифры
+
+        if len(digits) == 0:
+            formatted_text = ""
+        elif len(digits) <= 2: # ММ
+            formatted_text = digits
+        elif len(digits) <= 4: # ММ:СС
+            formatted_text = f"{digits[:2]}:{digits[2:]}"
+        else: # ЧЧ:ММ:СС
+            formatted_text = f"{digits[:2]}:{digits[2:4]}:{digits[4:]}"
+
+        # Устанавливаем отформатированный текст, если он изменился
+        # Используем блокировку событий, чтобы избежать рекурсии
+        if current_text != formatted_text:
+            widget.event_generate("<<TimecodeEntryBlock>>") # Блокируем событие
+            widget.delete(0, tk.END)
+            widget.insert(0, formatted_text)
+            # Пытаемся восстановить позицию курсора (может быть не идеально)
+            # Считаем, сколько двоеточий добавилось/удалилось до курсора
+            original_colons = current_text[:cursor_pos].count(':')
+            new_colons = formatted_text[:cursor_pos].count(':')
+            new_cursor_pos = cursor_pos + (new_colons - original_colons)
+            # Корректируем позицию, если она вышла за пределы
+            new_cursor_pos = min(new_cursor_pos, len(formatted_text))
+            widget.icursor(new_cursor_pos)
+            widget.event_generate("<<TimecodeEntryUnblock>>") # Разблокируем
+
+        # Предотвращаем дальнейшую стандартную обработку события, если мы изменили текст
+        if current_text != formatted_text:
+             return "break"
+
 
     def show_ffmpeg_commands(self) -> None:
         """Generates and displays the ffmpeg commands in the output area."""
